@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenChamber pane harness</title>
+<style>
+  body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #120f0e; color: #dbd7cc; }
+  body.light { background: #fdfcfa; color: #44443d; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; padding: 6px 12px; box-sizing: border-box; border-bottom: 1px solid #2a2726; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #504e4c; background: transparent; color: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: #da7c47; color: #eb8c57; }
+  output { color: #949187; }
+  iframe { display: block; width: 100%; height: calc(100vh - 45px); border: 0; }
+</style>
+</head>
+<body>
+<!-- Stands in for OpenChamber 2.3: the panel loads from the extension's guest route in an allow-scripts sandbox,
+     and this page answers the SDK the way the host does (ready, session, storage, service requests, open-url). -->
+<div class="bar">
+  <button id="a" type="button" aria-pressed="true">Conversation A</button>
+  <button id="b" type="button" aria-pressed="false">Conversation B</button>
+  <button id="theme" type="button">Light theme</button>
+  <label><input type="checkbox" id="hold"> Hold storage saves</label>
+  <button id="release" type="button">Release save</button>
+  <output id="pending"></output>
+  <output id="opened"></output>
+  <output id="badge"></output>
+</div>
+<iframe title="Agent Canvas pane" src="/api/guests/agent-canvas/panel/index.html" sandbox="allow-scripts"></iframe>
+<script>
+  const frame = document.querySelector('iframe');
+  const envelope = { channel: 'openchamber.sdk', v: 1 };
+  const $ = id => document.getElementById(id);
+  // ?a=<session>&b=<session> picks the two conversations; the fixture fills in their titles and the project directory.
+  const config = fetch('/fixture-config' + location.search).then(response => response.json());
+  const font = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  const mono = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  // The OpenChamber default themes, as PluginPane maps them onto ready.theme.tokens.
+  const themes = {
+    dark: { background: '#120f0e', elevated: '#1b1918', foreground: '#dbd7cc', muted: '#949187', subtle: '#171616', border: '#242323bf', hover: '#ffffff0f', selection: '#c8c6c52b', focus: '#da7c4755', primary: '#da7c47', mutedSurface: '#0e0c0b', elevatedForeground: '#dbd7cc', active: '#ffffff1a', selectionForeground: '#ffffff', primaryForeground: '#ffffff', primaryText: '#eb8c57', successText: '#8bc265', warningText: '#e0a03a', errorText: '#e8796b', infoText: '#6cb4ee', success: '#76ad4f', warning: '#c67f13', error: '#da5b4a', info: '#479fe6', font, mono, radius: '8px' },
+    light: { background: '#fdfcfa', elevated: '#f3f2f0', foreground: '#44443d', muted: '#696960', subtle: '#f7f6f4', border: '#e5e1debf', hover: '#0000000a', selection: '#a9998f2b', focus: '#b3501755', primary: '#b35017', mutedSurface: '#f7f6f4', elevatedForeground: '#44443d', active: '#00000014', selectionForeground: '#1b1918', primaryForeground: '#ffffff', primaryText: '#9a4310', successText: '#466a2c', warningText: '#7a5d10', errorText: '#a3413a', infoText: '#2c6ebd', success: '#517734', warning: '#886914', error: '#b7493f', info: '#2c6ebd', font, mono, radius: '8px' },
+  };
+  let current = 'a', mode = 'dark', held = [];
+
+  const post = message => frame.contentWindow.postMessage({ ...envelope, ...message }, '*');
+  async function session() {
+    const value = (await config)[current];
+    return value ? { id: value.id, title: value.title, busy: false } : null;
+  }
+  async function ready() {
+    const c = await config;
+    post({ type: 'ready', payload: { theme: { mode, tokens: themes[mode] }, locale: 'en', directory: c.directory, session: await session(), surface: 'panel', connection: { connected: false, account: '' }, settings: {}, item: null } });
+  }
+  async function switchTo(which) {
+    current = which;
+    $('a').setAttribute('aria-pressed', String(which === 'a'));
+    $('b').setAttribute('aria-pressed', String(which === 'b'));
+    post({ type: 'session', payload: { session: await session() } });
+  }
+  $('a').onclick = () => switchTo('a');
+  $('b').onclick = () => switchTo('b');
+  // OpenChamber repeats ready when the theme changes.
+  $('theme').onclick = () => {
+    mode = mode === 'dark' ? 'light' : 'dark';
+    document.body.classList.toggle('light', mode === 'light');
+    $('theme').textContent = mode === 'dark' ? 'Light theme' : 'Dark theme';
+    ready();
+  };
+  $('release').onclick = () => { const waiting = held; held = []; waiting.forEach(release => release()); $('pending').textContent = ''; };
+
+  const rejected = (message, code = 'HOST_REJECTED') => Object.assign(new Error(message), { code });
+  const storageKey = key => `pane-harness:${key}`;
+  async function storage(p) {
+    if (p.scope === 'device') throw rejected('Device storage is not available in this harness.');
+    if (p.op === 'get') {
+      const value = localStorage.getItem(storageKey(p.key));
+      return value === null ? { storage: true, op: 'get', found: false } : { storage: true, op: 'get', found: true, value: JSON.parse(value) };
+    }
+    if (p.op === 'set') {
+      const text = JSON.stringify(p.value);
+      if (new TextEncoder().encode(text).length > 65536) throw rejected('Storage values are limited to 64 KiB.');
+      if ($('hold').checked) {
+        $('pending').textContent = 'Storage save held';
+        await new Promise(resolve => held.push(resolve));
+      }
+      localStorage.setItem(storageKey(p.key), text);
+      return { storage: true, op: 'set' };
+    }
+    if (p.op === 'delete') { localStorage.removeItem(storageKey(p.key)); return { storage: true, op: 'delete' }; }
+    if (p.op === 'keys') return { storage: true, op: 'keys', keys: Object.keys(localStorage).filter(k => k.startsWith('pane-harness:')).map(k => k.slice(13)) };
+    throw rejected('Unknown storage operation.');
+  }
+  async function serviceRequest(payload) {
+    const response = await fetch('/host/service-request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const result = await response.json();
+    if (!response.ok) throw rejected(result.message || result.error, result.error);
+    return result;
+  }
+
+  window.addEventListener('message', async event => {
+    if (event.source !== frame.contentWindow || event.data?.channel !== envelope.channel) return;
+    const m = event.data;
+    if (m.type === 'hello') { ready(); return; }
+    if (!m.id) return;
+    try {
+      let payload;
+      if (m.type === 'service-request') payload = await serviceRequest(m.payload);
+      else if (m.type === 'service-status') payload = { status: 'ready' };
+      else if (m.type === 'storage') payload = await storage(m.payload);
+      else if (m.type === 'open-url') $('opened').textContent = m.payload.url;
+      else if (m.type === 'badge') $('badge').textContent = m.payload.count === null ? '' : `Badge ${m.payload.count}`;
+      else if (!['toast', 'clipboard-write', 'resize'].includes(m.type)) throw rejected(`This harness does not implement ${m.type}.`);
+      post({ type: 'result', id: m.id, ok: true, ...(payload ? { payload } : {}) });
+    } catch (error) {
+      post({ type: 'result', id: m.id, ok: false, error: error.message || 'Host error', code: error.code || 'HOST_REJECTED' });
+    }
+  });
+</script>
+</body>
+</html>

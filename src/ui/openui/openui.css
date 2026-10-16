@@ -1,0 +1,61 @@
+/* OpenUI hard-codes "Inter", which Canvas does not ship; use the platform's UI font instead. */
+:root{--canvas-openui-font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+[class*="openui-"]:not([class*="code"]){font-family:var(--canvas-openui-font)!important}
+.canvas-openui{min-width:0;max-width:100%;color:var(--openui-text-neutral-primary);font-family:var(--canvas-openui-font)}
+.canvas-openui[data-disabled] [class*="openui-button-base"]{opacity:.55;cursor:not-allowed}
+
+.canvas-diagram{display:flex;flex-direction:column;gap:var(--openui-space-s,8px);min-width:0;width:100%;color:var(--openui-text-neutral-primary);font:400 13px/1.4 var(--canvas-openui-font)}
+.canvas-diagram-empty{padding:16px;border:1px dashed var(--openui-border-default);border-radius:var(--openui-radius-m,8px);color:var(--openui-text-neutral-secondary)}
+.canvas-diagram-scroll{overflow:auto;max-width:100%;max-height:80vh;border:1px solid var(--openui-border-default);border-radius:var(--openui-radius-l,12px);background-color:var(--openui-foreground);background-image:radial-gradient(var(--openui-border-interactive,rgba(127,127,127,.25)) .8px,transparent .8px);background-size:16px 16px;-webkit-overflow-scrolling:touch}
+.canvas-diagram-plane{position:relative;margin:0 auto}
+.canvas-diagram-edges{position:absolute;inset:0;overflow:visible}
+.canvas-diagram-edge{fill:none;stroke:var(--openui-text-neutral-tertiary);stroke-width:1.5;transition:stroke .15s,opacity .15s}
+.canvas-diagram-arrowhead{fill:var(--openui-text-neutral-tertiary)}
+.canvas-diagram-arrowhead-active{fill:var(--openui-text-brand)}
+.canvas-diagram.has-selection .canvas-diagram-edge{opacity:.35}
+.canvas-diagram.has-selection .canvas-diagram-edge.active{opacity:1;stroke:var(--openui-text-brand);stroke-width:2}
+.canvas-diagram-edge-label{font:500 11px/1 var(--canvas-openui-font);fill:var(--openui-text-neutral-secondary);paint-order:stroke;stroke:var(--openui-foreground);stroke-width:4px;stroke-linejoin:round}
+.canvas-diagram.has-selection .canvas-diagram-edge-label{opacity:.45}
+.canvas-diagram.has-selection .canvas-diagram-edge-label.active{opacity:1;fill:var(--openui-text-neutral-primary)}
+.canvas-diagram-node{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:2px;margin:0;padding:8px 12px;text-align:left;cursor:pointer;color:var(--openui-text-neutral-primary);background:var(--openui-foreground);background-image:linear-gradient(var(--canvas-node-tint,transparent),var(--canvas-node-tint,transparent));border:1px solid var(--openui-border-interactive,var(--openui-border-default));border-left:4px solid var(--canvas-node-accent,var(--openui-border-interactive,var(--openui-border-default)));border-radius:var(--openui-radius-m,8px);box-shadow:var(--openui-shadow-s,none);font:inherit;transition:border-color .15s,box-shadow .15s,transform .15s}
+.canvas-diagram-node:hover{border-color:var(--canvas-node-accent,var(--openui-border-interactive-emphasis,var(--openui-text-neutral-secondary)));box-shadow:var(--openui-shadow-m,none)}
+.canvas-diagram-node:focus-visible{outline:2px solid var(--openui-text-brand);outline-offset:2px}
+.canvas-diagram-node.selected{border-color:var(--openui-text-brand);box-shadow:0 0 0 2px var(--openui-text-brand)}
+.canvas-diagram-group{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--canvas-node-text,var(--openui-text-neutral-secondary))}
+.canvas-diagram-label{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;font-size:13px;font-weight:560;line-height:1.3;overflow-wrap:anywhere}
+.canvas-diagram-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0;list-style:none;font-size:12px;color:var(--openui-text-neutral-secondary)}
+.canvas-diagram-legend li{display:inline-flex;align-items:center;gap:6px}
+.canvas-diagram-swatch{width:10px;height:10px;border-radius:3px;background:var(--canvas-node-accent,var(--openui-border-interactive))}
+.canvas-diagram-detail{min-height:44px;padding:12px 14px;border:1px solid var(--openui-border-default);border-radius:var(--openui-radius-l,12px);background:var(--openui-foreground)}
+.canvas-diagram-detail p{margin:0}
+.canvas-diagram-detail-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px;font-size:14px}
+.canvas-diagram-detail-text{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--openui-text-neutral-primary);line-height:1.5}
+.canvas-diagram-muted{color:var(--openui-text-neutral-secondary);font-size:12px}
+.canvas-diagram-chip{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;color:var(--canvas-node-text,var(--openui-text-neutral-secondary));background:var(--canvas-node-tint,var(--openui-sunk))}
+.canvas-diagram-connections{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:10px}
+.canvas-diagram-connections ul{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px}
+.canvas-diagram-link{padding:0;border:0;background:none;color:var(--openui-text-brand);font:inherit;cursor:pointer;text-align:left}
+.canvas-diagram-link:hover{text-decoration:underline}
+.canvas-diagram-link:focus-visible{outline:2px solid var(--openui-text-brand);outline-offset:2px;border-radius:2px}
+.canvas-diagram-edge-note{color:var(--openui-text-neutral-secondary)}
+.canvas-diagram .tone-0{--canvas-node-accent:var(--openui-text-info-primary);--canvas-node-tint:var(--openui-info-background);--canvas-node-text:var(--openui-text-info-primary)}
+.canvas-diagram .tone-1{--canvas-node-accent:var(--openui-text-success-primary);--canvas-node-tint:var(--openui-success-background);--canvas-node-text:var(--openui-text-success-primary)}
+.canvas-diagram .tone-2{--canvas-node-accent:var(--openui-text-purple-primary);--canvas-node-tint:var(--openui-purple-background);--canvas-node-text:var(--openui-text-purple-primary)}
+.canvas-diagram .tone-3{--canvas-node-accent:var(--openui-text-alert-primary);--canvas-node-tint:var(--openui-alert-background);--canvas-node-text:var(--openui-text-alert-primary)}
+.canvas-diagram .tone-4{--canvas-node-accent:var(--openui-text-pink-primary);--canvas-node-tint:var(--openui-pink-background);--canvas-node-text:var(--openui-text-pink-primary)}
+.canvas-diagram .tone-5{--canvas-node-accent:var(--openui-text-danger-primary);--canvas-node-tint:var(--openui-danger-background);--canvas-node-text:var(--openui-text-danger-primary)}
+@media (prefers-reduced-motion:reduce){.canvas-diagram-node,.canvas-diagram-edge{transition:none}}
+
+/* OpenUI's accent is its own blue. Use the Canvas accent, which follows the OpenChamber host in the pane, so both
+   formats and the shell share one look. :root:root outranks OpenUI's :root[data-openui-theme] rules. */
+:root:root{--openui-interactive-accent-default:var(--accent-fill);--openui-interactive-accent-pressed:var(--accent-fill);--openui-interactive-accent-hover:color-mix(in srgb,var(--accent-fill) 82%,transparent);--openui-interactive-accent-disabled:color-mix(in srgb,var(--accent-fill) 40%,transparent);--openui-text-accent-primary:var(--accent-ink);--openui-text-brand:var(--accent);--openui-border-accent:color-mix(in srgb,var(--accent) 20%,transparent);--openui-border-accent-emphasis:color-mix(in srgb,var(--accent) 40%,transparent)}
+/* Card's default "card" variant is described as elevated but upstream draws nothing; give it a visible surface. */
+.canvas-openui .openui-card-card{padding:var(--openui-space-l);border-radius:var(--openui-radius-3xl);background-color:var(--openui-foreground);border-color:var(--openui-border-default)}
+/* Cards in a wrapping row keep a readable width and wrap, instead of upstream's flex:1 squeezing them into one row. */
+/* Stack sets these inline; browsers serialize a row that wraps in any of these forms. */
+.canvas-openui :is([style*="flex-flow: wrap"],[style*="flex-flow: row wrap"],[style*="flex-direction: row"][style*="flex-wrap: wrap"])>.openui-card{flex:1 1 14rem!important}
+.canvas-slider-unlabeled .openui-slider-block__label{display:none}
+.canvas-chart-axes{margin:4px 0 0;font-size:12px;color:var(--openui-text-neutral-secondary);text-align:center}
+.canvas-diagram-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;font-size:12px;color:var(--openui-text-neutral-secondary)}
+.canvas-diagram-tools button{padding:3px 10px;border:1px solid var(--openui-border-default);border-radius:999px;background:var(--openui-foreground);color:var(--openui-text-neutral-primary);font:inherit;cursor:pointer}
+.canvas-diagram-tools button:focus-visible{outline:2px solid var(--openui-text-brand);outline-offset:2px}

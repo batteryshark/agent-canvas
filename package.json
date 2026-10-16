@@ -1,0 +1,53 @@
+{
+  "name": "agent-canvas",
+  "version": "0.2.0",
+  "description": "A visual surface for OpenCode agents: mockups, charts, tables, forms, diagrams and interactive pages in OpenUI or sandboxed HTML, viewed in OpenChamber, the browser, or on a phone.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/batteryshark/agent-canvas.git"
+  },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node --import tsx scripts/generate-openui.mjs",
+    "build": "npm run generate && node scripts/build.mjs",
+    "typecheck": "npm run generate && tsc --noEmit",
+    "test": "npm run generate && tsx --test test/*.test.ts",
+    "test:browser": "npm run build && playwright test",
+    "test:native": "npm run build && node scripts/test-runtime.mjs",
+    "check": "npm run typecheck && tsx --test test/*.test.ts && node scripts/build.mjs",
+    "start": "node dist/opencode/canvas-service.cjs serve",
+    "demo": "node dist/opencode/canvas-service.cjs demo"
+  },
+  "dependencies": {
+    "@openchamber/sdk": "2.3.0",
+    "@opencode/client": "2.0.23",
+    "@opencode/plugin": "2.0.23",
+    "@openuidev/lang-core": "1.0.1",
+    "@openuidev/react-headless": "0.18.1",
+    "@openuidev/react-lang": "1.0.1",
+    "@openuidev/react-ui": "0.18.1",
+    "@tailwindcss/browser": "4.3.3",
+    "chart.js": "4.5.1",
+    "d3": "7.9.0",
+    "effect": "4.0.0-rc.112",
+    "mermaid": "12.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "4.1.8",
+    "zustand": "4.5.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
