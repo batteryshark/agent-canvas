@@ -10,6 +10,8 @@ const MIN_HEIGHT = 240;
 const FRAME_URL = '/frame';
 export const SEND_DISABLED_REASON = 'Sending is turned off for this view: it shows an older revision, or Agent Canvas is not connected to the conversation.';
 export const GESTURE_REASON = 'Input is sent only from a click or key press in the page, not on load or from a timer.';
+export const LEFT_NOTICE = 'This page tried to navigate away from the canvas and was stopped.';
+export const LEFT_ERROR = 'The page tried to navigate its own frame to another document (by setting location, following a link or a meta refresh), so Canvas stopped it and hid the page. A Canvas page cannot load another document: open web pages with canvas.openLink(url) from a click, and show other screens by changing the page\'s own content, keeping what should survive a reload in canvas.state.';
 
 /**
  * Whether the user is acting in this frame right now, judged in the app's own window, which the page cannot reach:
@@ -41,12 +43,21 @@ export function HtmlView(p: Props): JSX.Element {
   const frame = useRef<HTMLIFrameElement>(null);
   const built = useRef<Built | null>(null);
   const errors = useRef<string[]>([]);
+  // The build whose frame tried to leave its page: it stays hidden until the user asks for the page again.
+  const leftKey = useRef<number | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
+  const [attempt, setAttempt] = useState(0);
   // The newest draft the page posted; a rebuild of the same revision restores it rather than the older prop.
   const draft = useRef<{ viewKey: string; state: unknown } | null>(null);
   const [doc, setDoc] = useState<Built | null>(null);
   const [contentHeight, setContentHeight] = useState(MIN_HEIGHT);
   const [viewport, setViewport] = useState(() => typeof window === 'undefined' ? 800 : window.innerHeight);
   const viewKey = `${p.view.id}:${p.view.revision}`;
+  const report = (message: string) => {
+    if (!message || errors.current.includes(message) || errors.current.length >= 20) return;
+    errors.current = [...errors.current, message];
+    latest.current.onErrors(errors.current);
+  };
 
   useEffect(() => {
     let live = true;
@@ -77,7 +88,7 @@ export function HtmlView(p: Props): JSX.Element {
       latest.current.onErrors(errors.current);
     });
     return () => { live = false; };
-  }, [p.source, p.view.id, p.view.revision, p.view.title]);
+  }, [p.source, p.view.id, p.view.revision, p.view.title, attempt]);
 
   useEffect(() => {
     const post = (target: Window, message: Record<string, unknown>) => target.postMessage({ channel: CHANNEL, v: 1, ...message }, '*');
@@ -133,19 +144,29 @@ export function HtmlView(p: Props): JSX.Element {
           if ((url.protocol === 'http:' || url.protocol === 'https:') && userActingIn(frame.current)) p.onOpenUrl(url.href);
           return;
         }
-        case 'error': {
-          const message = typeof m.message === 'string' ? m.message.trim().slice(0, 1000) : '';
-          if (!message || errors.current.includes(message) || errors.current.length >= 20) return;
-          errors.current = [...errors.current, message];
-          p.onErrors(errors.current);
-          return;
-        }
+        case 'error': report(typeof m.message === 'string' ? m.message.trim().slice(0, 1000) : ''); return;
       }
+    }
+    // A page that navigates its own frame is refused by this document's frame-src, and Chrome puts its error page in the
+    // frame. The page cannot be held in place from its own realm, so this window, whose policy saw the refusal, hides
+    // the frame and tells the agent. It never reloads the page itself: a page that navigates on load would loop.
+    // This document embeds no other frame, so a frame-src refusal here is the page's.
+    function onViolation(event: SecurityPolicyViolationEvent) {
+      const current = built.current;
+      if (!frame.current || !current?.html || leftKey.current === current.key) return;
+      if (event.effectiveDirective !== 'frame-src' && event.effectiveDirective !== 'child-src') return;
+      leftKey.current = current.key;
+      setLeft(current.key);
+      report(LEFT_ERROR);
     }
     const onResize = () => setViewport(window.innerHeight);
     window.addEventListener('message', onMessage);
     window.addEventListener('resize', onResize);
-    return () => { window.removeEventListener('message', onMessage); window.removeEventListener('resize', onResize); };
+    document.addEventListener('securitypolicyviolation', onViolation);
+    return () => {
+      window.removeEventListener('message', onMessage); window.removeEventListener('resize', onResize);
+      document.removeEventListener('securitypolicyviolation', onViolation);
+    };
   }, []);
 
   // Theme changes restyle the running page through the bridge; the page is never reloaded for them.
@@ -159,6 +180,9 @@ export function HtmlView(p: Props): JSX.Element {
   const fill = !!p.fill;
   return <div className="canvas-html" style={{ position: 'relative', width: '100%', ...(fill ? { height: '100%' } : {}) }}>
     {doc?.error ? <div className="canvas-html-error" role="alert">This page could not be shown. {doc.error}</div>
+      : doc && left === doc.key ? <div className="canvas-html-error" role="alert">
+        <span>{LEFT_NOTICE}</span><button type="button" onClick={() => setAttempt(n => n + 1)}>Show the page again</button>
+      </div>
       : doc?.html ? <iframe
         key={`${doc.key}:${p.frameMode}`}
         ref={frame}

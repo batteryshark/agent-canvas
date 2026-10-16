@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { TITLES } from './seeds';
-import { BEACON, beacons, htmlFrame, openView, received, seed, show, sidebar, viewUrl } from './helpers';
+import { BEACON, beacons, htmlFrame, openView, read, received, seed, show, sidebar, viewUrl, type Scope } from './helpers';
 
 const BLOCKED = ['fetchService', 'fetchRemote', 'parentDocument', 'parentLocalStorage', 'parentSessionStorage', 'ownLocalStorage', 'ownSessionStorage', 'cookie', 'popup'];
 
@@ -183,6 +183,17 @@ const leaving = (name: string) => `<!doctype html><html lang="en"><head><meta ch
   setTimeout(() => { try { ${LEAVING_TRIES[name]} } catch (error) {} }, 500);
 </script></body></html>`;
 
+// The host's notice where a page that tried to leave was, and what the agent reads about it.
+const LEFT_NOTICE = 'This page tried to navigate away from the canvas and was stopped.';
+const LEFT_ERROR = /tried to navigate its own frame[^\n]*canvas\.openLink/g;
+const leftNotice = (scope: Scope) => scope.getByRole('alert').filter({ hasText: LEFT_NOTICE });
+const LEAVING_ON_CLICK = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Leaving on click</title></head><body>
+<p id="home">Canvas page</p><button id="reload" type="button">Reload</button><button id="leave" type="button">Leave</button>
+<script>
+  document.getElementById('reload').addEventListener('click', () => { document.body.dataset.reloading = 'yes'; location.reload(); });
+  document.getElementById('leave').addEventListener('click', event => { event.stopPropagation(); location.href = 'data:text/html,' + encodeURIComponent('<p id="escaped">left</p>'); });
+</script></body></html>`;
+
 for (const surface of ['browser', 'pane'] as const) {
   test(`in the ${surface}, a page cannot open a link or send input without the user's click`, async ({ page, request, context }) => {
     const popups: string[] = [];
@@ -260,6 +271,10 @@ for (const surface of ['browser', 'pane'] as const) {
       const frame = htmlFrame(scope, title);
       await expect(frame.locator('#home'), name).toBeAttached();
       const app = page.url();
+      // The host replaces the refused frame with a notice, never reloads it, and tells the agent why.
+      await expect(leftNotice(scope), name).toBeVisible();
+      await expect(scope.locator(`iframe[title="Canvas page: ${title}"]`), name).toHaveCount(0);
+      await expect.poll(async () => (await read(request, s.sessionId, view.id)).match(LEFT_ERROR)?.length, name).toBe(1);
       await page.waitForTimeout(2_000);
       expect(await beacons(request), name).toEqual([]);
       // The frame holds the Canvas page or, once Chrome refuses the navigation, its error page: never another document.
@@ -269,7 +284,35 @@ for (const surface of ['browser', 'pane'] as const) {
       await expect(frame.locator('#escaped'), name).toHaveCount(0);
       expect(page.url(), name).toBe(app);
       await expect(sidebar(scope).getByRole('button', { name: title }).first(), name).toBeVisible();
+      await expect(leftNotice(scope), name).toBeVisible();
     }
+  });
+
+  test(`in the ${surface}, a page that tried to leave stays hidden until the user shows it again`, async ({ page, request }) => {
+    const s = await seed(request, `Leaving on click in the ${surface}`, []);
+    const scope = surface === 'browser' ? page : page.frameLocator('iframe[title="Agent Canvas pane"]');
+    const view = await show(request, s.sessionId, 'Leaving on click', 'html', LEAVING_ON_CLICK);
+    await page.goto(surface === 'browser' ? viewUrl(s.url, view.id) : `http://127.0.0.1:4319/harness?a=${s.sessionId}&b=${s.sessionId}`);
+    const frame = htmlFrame(scope, 'Leaving on click');
+    // Reloading itself is not leaving: the page comes back in the same frame.
+    await frame.getByRole('button', { name: 'Reload' }).click();
+    await expect(frame.locator('body')).not.toHaveAttribute('data-reloading', 'yes');
+    await expect(frame.locator('#home')).toBeVisible();
+    await page.waitForTimeout(1_000);
+    await expect(leftNotice(scope)).toHaveCount(0);
+
+    await frame.getByRole('button', { name: 'Leave' }).click();
+    await expect(leftNotice(scope)).toBeVisible();
+    await expect.poll(async () => (await read(request, s.sessionId, view.id)).match(LEFT_ERROR)?.length).toBe(1);
+    // The notice stays put; only the user brings the page back.
+    await page.waitForTimeout(1_000);
+    await expect(leftNotice(scope)).toBeVisible();
+    await leftNotice(scope).getByRole('button', { name: 'Show the page again' }).click();
+    await expect(frame.locator('#home')).toBeVisible();
+    await page.waitForTimeout(1_000);
+    await expect(leftNotice(scope)).toHaveCount(0);
+    await expect(frame.locator('#escaped')).toHaveCount(0);
+    expect((await read(request, s.sessionId, view.id)).match(LEFT_ERROR)?.length).toBe(1);
   });
 }
 

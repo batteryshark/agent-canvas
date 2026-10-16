@@ -69,6 +69,12 @@ export async function show(request: APIRequestContext, sessionId: string, title:
   expect(response.ok(), await response.text()).toBe(true);
   return response.json();
 }
+/** What the agent sees when it reads a view with the real canvas_read tool, render errors included. */
+export async function read(request: APIRequestContext, sessionId: string, viewId: string): Promise<string> {
+  const response = await request.post(`${CONTROL}/read`, { data: { sessionId, viewId } });
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json()).text;
+}
 /** Pins a view as the conversation's viewer would, through the service's viewer API. */
 export async function pin(request: APIRequestContext, viewerKey: string, viewId: string, name: string, expectedRevision: number) {
   const response = await request.post(`${SERVICE}/api/pin`, { headers: { Authorization: `Bearer ${viewerKey}` }, data: { viewId, name, expectedRevision } });

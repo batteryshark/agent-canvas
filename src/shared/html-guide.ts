@@ -292,7 +292,7 @@ ${libraries}
 4. **The page is sandboxed.** It runs with scripts only, in an origin of its own:
    - \`alert()\`, \`confirm()\`, \`prompt()\` and popups do nothing. Show messages and confirmations in the page.
    - Real form submission is blocked. Use a \`data-canvas-action\` form or \`canvas.send()\` (below).
-   - \`http(s)\` links open in a new browser tab through Canvas, \`#anchor\` links scroll the page, and other navigation is ignored. The page cannot navigate the app around it.
+   - \`http(s)\` links open in a new browser tab through Canvas, \`#anchor\` links scroll the page, and other link navigation is ignored. The page cannot load another document into its frame: setting \`location\` or a meta refresh is stopped, Canvas hides the page behind a notice and reports an error. Change the page's own content instead. The page cannot navigate the app around it.
    - \`localStorage\` and \`sessionStorage\` last only for this page view; cookies and IndexedDB are unavailable. Use \`canvas.state\` for anything that should survive a reload.
 5. **Do not name your own global \`canvas\`.** \`window.canvas\` is the bridge, so call your \`<canvas>\` element \`board\` or \`chartCanvas\`. \`window.agentCanvas\` is the same bridge under a name that never collides.
 6. **Design for any width.** The same page shows in a narrow pane and on a 390 px phone. Use \`flex-wrap\`, \`grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr))\` and \`max-width: 100%\`; the page itself must never scroll sideways.

@@ -18,12 +18,12 @@ html, body { margin: 0; background: var(--bg); color: var(--text); }
 body { font-family: var(--font-sans); font-size: 14px; line-height: 1.5; font-synthesis: none; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; }
 
 /* Shell chrome only: the content host keeps OpenUI's own element styling. */
-:where(.sidebar, .toolbar, .banner, .pin-form, .revision-bar, .notes, .deliveries, .empty-state, .render-errors) :is(button, input, textarea, select) { font: inherit; color: var(--text); }
-:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state) button {
+:where(.sidebar, .toolbar, .banner, .pin-form, .revision-bar, .notes, .deliveries, .empty-state, .render-errors, .canvas-html-error) :is(button, input, textarea, select) { font: inherit; color: var(--text); }
+:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state, .canvas-html-error) button {
   cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 7px 12px; font-size: 12px; line-height: 1.3;
 }
-:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state) button:hover:not(:disabled) { border-color: var(--accent); }
-:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state) button:disabled { cursor: default; opacity: .5; }
+:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state, .canvas-html-error) button:hover:not(:disabled) { border-color: var(--accent); }
+:where(.sidebar, .toolbar, .banner, .pin-form, .deliveries, .empty-state, .canvas-html-error) button:disabled { cursor: default; opacity: .5; }
 :where(.pin-form, .empty-state) button.primary { background: var(--accent-fill); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
 :where(.pin-form, .revision-bar, .notes, .surface-setting) :is(input, textarea, select) { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; max-width: 100%; }
 :where(.shell) :is(button, a, select, input, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -64,6 +64,8 @@ main { min-width: 0; display: flex; flex-direction: column; }
   border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); }
 .banner > span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
 .banner.error { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.canvas-html-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 article > .banner { margin: 0 0 14px; }
 .pin-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 24px 0; font-size: 13px; }
 .pin-form input { flex: 1 1 200px; min-width: 0; }

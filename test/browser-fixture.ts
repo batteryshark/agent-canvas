@@ -300,6 +300,10 @@ const server = createServer(async (req, res) => {
     if (path.startsWith('/beacon/')) { beacons.push(`${req.method} ${url.pathname}${url.search}`); res.writeHead(204); res.end(); return; }
     if (path === '/control/beacons') { json(res, 200, { beacons }); return; }
     if (path === '/control/show' && req.method === 'POST') { json(res, 200, await showSource(await readBody(req))); return; }
+    if (path === '/control/read' && req.method === 'POST') {
+      const body = await readBody(req);
+      json(res, 200, { text: await runTool(body.sessionId, 'canvas_read', { viewId: body.viewId }) }); return;
+    }
     if (path === '/harness') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(readFileSync(join(root, 'test/pane-host.html'))); return; }
     if (path === '/fixture-config') { json(res, 200, { directory: projectDir, a: sessionInfo(url.searchParams.get('a'), a), b: sessionInfo(url.searchParams.get('b'), b) }); return; }
     if (path.startsWith(`/api/guests/${GUEST_ID}/`) && req.method === 'GET') { guestAsset(req, res, decodeURIComponent(path.slice(`/api/guests/${GUEST_ID}/`.length))); return; }
