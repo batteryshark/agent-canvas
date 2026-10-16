@@ -172,7 +172,10 @@ const LEAVING_TRIES: Record<string, string> = {
   blob: "location.href = URL.createObjectURL(new Blob([escaped('blob')], { type: 'text/html' }));",
   // In the pane this is OpenChamber's own origin, which the guest policy allows as 'self'.
   http: "location.href = base + 'navigation';",
+  // Browser only: another URL of the Canvas service, which the app's frame-src refuses because it names only /frame.
+  'http-self': "location.href = '/api/snapshot';",
 };
+const PANE_LEAVING = Object.keys(LEAVING_TRIES).filter(name => name !== 'http-self');
 const leaving = (name: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Leaving</title></head><body>
 <p id="home">Canvas page</p>
 <script>
@@ -262,7 +265,7 @@ for (const surface of ['browser', 'pane'] as const) {
     test.setTimeout(120_000);
     const s = await seed(request, `Leaving in the ${surface}`, []);
     const scope = surface === 'browser' ? page : page.frameLocator('iframe[title="Agent Canvas pane"]');
-    for (const name of Object.keys(LEAVING_TRIES)) {
+    for (const name of surface === 'browser' ? Object.keys(LEAVING_TRIES) : PANE_LEAVING) {
       const title = `Leaving ${name}`;
       const view = await show(request, s.sessionId, title, 'html', leaving(name));
       const start = surface === 'browser' ? viewUrl(s.url, view.id) : `http://127.0.0.1:4319/harness?a=${s.sessionId}&b=${s.sessionId}`;

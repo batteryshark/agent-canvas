@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { get } from 'node:http';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../src/server/store';
-import { APP_CSP, createCanvasServer } from '../src/server/http';
+import { appCsp, createCanvasServer } from '../src/server/http';
 import { FRAME_CSP, FRAME_SHELL_HTML } from '../src/server/frame-shell';
 import { HTML_LIBRARIES } from '../src/shared/html-check';
 import { LIMITS, type Session, type ViewDetail, type ViewListing } from '../src/shared/contract';
@@ -34,7 +35,15 @@ async function fixture(t: any, storeReady = true) {
     body: init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
   });
   const agent = (path: string, body: unknown) => call(path, { body, token: config.token });
-  return { store, config, base, call, agent };
+  // fetch always sends the address it connects to as Host; this sends the given one, as a proxy or another name would.
+  const at = (path: string, host: string, headers: Record<string, string> = {}) => new Promise<{ status: number; headers: Record<string, string | undefined>; csp?: string; body: string }>((done, fail) => {
+    const req = get(base + path, { headers: { ...headers, Host: host } }, res => {
+      let body = '';
+      res.setEncoding('utf8').on('data', chunk => { body += chunk; }).on('end', () => done({ status: res.statusCode!, headers: res.headers as Record<string, string | undefined>, csp: res.headers['content-security-policy'] as string | undefined, body }));
+    });
+    req.on('error', fail);
+  });
+  return { store, config, base, call, agent, at };
 }
 
 test('agent routes need the agent token and drive show, read, claim and ack', async t => {
@@ -134,22 +143,47 @@ test('foreign origins are rejected; the endpoint and public origins are allowed'
   assert.equal((await call('/', { headers: { Origin: 'https://untrusted.test' } })).status, 403);
 });
 
-test('static app, frame shell and libraries are served with their policies', async t => {
-  const { call } = await fixture(t);
-  for (const path of ['/', '/index.html']) {
-    const page = await call(path);
-    assert.equal(page.status, 200);
-    assert.equal(page.headers.get('content-security-policy'), APP_CSP);
-    assert.match(page.headers.get('content-type')!, /text\/html/);
-    assert.match(await page.text(), /Agent Canvas/);
+test('the app is served only at a trusted address, and its frame may load only that address\'s /frame', async t => {
+  const { at } = await fixture(t);
+  for (const [host, origin] of [['127.0.0.1:4999', 'http://127.0.0.1:4999'], ['localhost:4999', 'http://localhost:4999'], ['LOCALHOST:4999', 'http://localhost:4999'], ['canvas.example.ts.net', PUBLIC]]) {
+    const page = await at('/', host);
+    assert.equal(page.status, 200, host);
+    assert.equal(page.csp, appCsp([origin]), host);
+    assert.match(page.csp!, new RegExp(`frame-src ${origin}/frame;`), host);
   }
-  assert.match(APP_CSP, /frame-ancestors 'none'/);
-  assert.match(APP_CSP, /frame-src 'self'/);
-  const script = await call('/app.js');
-  assert.match(script.headers.get('content-type')!, /text\/javascript/);
-  assert.equal(script.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal((await call('/app.js', { headers: { 'If-None-Match': script.headers.get('etag')! } })).status, 304);
-  assert.match((await call('/app.css')).headers.get('content-type')!, /text\/css/);
+  // Another name for the loopback service (DNS rebinding), another port, a look-alike, or no Host at all.
+  for (const host of ['evil.test', 'evil.test:4999', '127.0.0.1:4998', '127.0.0.1', 'canvas.example.ts.net:443', 'canvas.example.ts.net.evil.test', 'canvas.example.ts.net:8443', '127.0.0.1:4999 evil.test', '']) {
+    const page = await at('/index.html', host);
+    assert.equal(page.status, 421, host);
+    assert.equal(page.csp, undefined, host);
+  }
+  assert.equal((await at('/app.js', 'evil.test')).status, 421);
+  // Every spelling of /frame that CSP matches gets the shell (with its own policy); /frame/ and others are not /frame.
+  for (const path of ['/frame', '/frame?x=1', '/%66rame', '/fram%65']) {
+    const frame = await at(path, 'evil.test');
+    assert.equal(frame.status, 200, path);
+    assert.equal(frame.csp, FRAME_CSP, path);
+  }
+  for (const path of ['/frame/', '/FRAME', '/frame%2F', '/%2Fframe', '/%E0frame']) assert.equal((await at(path, '127.0.0.1:4999')).status, 404, path);
+});
+
+test('static app, frame shell and libraries are served with their policies', async t => {
+  const { call, at } = await fixture(t);
+  const app = (path: string, headers?: Record<string, string>) => at(path, '127.0.0.1:4999', headers);
+  for (const path of ['/', '/index.html']) {
+    const page = await app(path);
+    assert.equal(page.status, 200);
+    assert.equal(page.csp, appCsp(['http://127.0.0.1:4999']));
+    assert.match(page.headers['content-type']!, /text\/html/);
+    assert.match(page.body, /Agent Canvas/);
+  }
+  assert.match(appCsp([PUBLIC]), /frame-ancestors 'none'/);
+  assert.match(appCsp([PUBLIC]), / frame-src https:\/\/canvas\.example\.ts\.net\/frame; /);
+  const script = await app('/app.js');
+  assert.match(script.headers['content-type']!, /text\/javascript/);
+  assert.equal(script.headers['x-content-type-options'], 'nosniff');
+  assert.equal((await app('/app.js', { 'If-None-Match': script.headers.etag! })).status, 304);
+  assert.match((await app('/app.css')).headers['content-type']!, /text\/css/);
 
   const frame = await call('/frame');
   assert.equal(frame.status, 200);

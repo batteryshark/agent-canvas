@@ -11,7 +11,12 @@ import type { Store } from './store';
 import type { Connection } from './config';
 
 export const SERVICE_VERSION = 2;
-export const APP_CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+/**
+ * The app's policy. Its only frame is the HTML page at /frame, and frame-src names that one URL, so the page cannot
+ * navigate its own frame anywhere else, not even to another Canvas URL: the refusal reaches HtmlView as a
+ * securitypolicyviolation. A path needs a host-source, so the caller passes the trusted origins the browser is using.
+ */
+export const appCsp = (origins: string[]) => `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; frame-src ${origins.map(o => `${o}/frame`).join(' ')}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`;
 
 /** Reads a JSON body up to `limit` bytes. Over the limit it answers 413 and lets Node discard the rest, so clients still read the response. */
 export function readJson(req: IncomingMessage, limit: number = LIMITS.requestBytes): Promise<any> {
@@ -51,6 +56,14 @@ function allowedOrigins(config: Connection) {
   if (endpoint.hostname === '127.0.0.1') origins.add(`${endpoint.protocol}//localhost${endpoint.port ? `:${endpoint.port}` : ''}`);
   return origins;
 }
+/** Each trusted origin by its host (lowercase, port only when not the default), as browsers send it in Host. */
+function originsByHost(origins: Set<string>) {
+  const hosts = new Map<string, string[]>();
+  for (const origin of origins) { const { host } = new URL(origin); hosts.set(host, [...hosts.get(host) ?? [], origin]); }
+  return hosts;
+}
+/** CSP matches a path segment after percent-decoding it, so every spelling of /frame it allows must get the shell. */
+const isFramePath = (path: string) => { try { return decodeURIComponent(path) === '/frame'; } catch { return false; } };
 const baseHeaders = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 function sendFile(req: IncomingMessage, res: ServerResponse, path: string, type: string, headers: Record<string, string> = {}) {
   let stat;
@@ -72,7 +85,7 @@ const STATIC: Record<string, [string, string]> = {
  * `assets` is the built browser app (dist/opencode/web); bundled libraries live in its lib/ folder as NAME.js.
  */
 export function createCanvasServer(source: Store | (() => Store | undefined), config: Connection, assets: string): Server {
-  const origins = allowedOrigins(config);
+  const origins = allowedOrigins(config), hosts = originsByHost(origins);
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url || '/', 'http://canvas.invalid'), path = url.pathname, method = req.method;
@@ -112,7 +125,8 @@ export function createCanvasServer(source: Store | (() => Store | undefined), co
         throw new CanvasError(404, 'Canvas route not found');
       }
       if (method !== 'GET') throw new CanvasError(405, 'Method not allowed');
-      if (path === '/frame') {
+      // Never redirect here: CSP ignores the path of a redirected request, so the app's frame-src would allow any URL.
+      if (isFramePath(path)) {
         res.writeHead(200, { ...baseHeaders, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'Content-Security-Policy': FRAME_CSP });
         res.end(FRAME_SHELL_HTML); return;
       }
@@ -123,7 +137,10 @@ export function createCanvasServer(source: Store | (() => Store | undefined), co
       }
       const file = STATIC[path];
       if (!file) throw new CanvasError(404, 'Not found');
-      sendFile(req, res, join(assets, file[0]), file[1], { 'Content-Security-Policy': APP_CSP });
+      // The app's frame-src names this address, so it must be one of ours: Tailscale Serve passes the browser's Host on.
+      const served = hosts.get(req.headers.host?.toLowerCase() ?? '');
+      if (!served) throw new CanvasError(421, 'Agent Canvas is not served at this address. Open it from a link the agent gave you.');
+      sendFile(req, res, join(assets, file[0]), file[1], { 'Content-Security-Policy': appCsp(served) });
     } catch (error) {
       const status = error instanceof CanvasError ? error.status : error instanceof ZodError ? 400 : 500;
       json(res, status, { error: status === 500 ? 'Canvas service error. Check the service log.' : describeError(error) });

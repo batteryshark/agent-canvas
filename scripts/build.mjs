@@ -59,7 +59,7 @@ const page = (head = '') => `<!doctype html><html lang="en"><head><meta charset=
 // OpenChamber's guest CSP lets the pane's frames load 'self', data: and blob:, so an HTML page could navigate its own
 // frame to a document the bridge never runs in (PROJECT.md Q4). The pane's only frame is the srcdoc page, which CSP does
 // not check, so the panel adds frame-src 'none'; browsers enforce it alongside the guest header. The browser surface's
-// app CSP (frame-src 'self', for /frame) is sent by the service.
+// app CSP, whose frame-src names only /frame, is sent by the service.
 const PANEL_HEAD = `<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">`;
 for (const [surface, dir] of [['browser', `${OPENCODE}/web`], ['openchamber', `${OPENCHAMBER}/panel`]]) {
   await compile({

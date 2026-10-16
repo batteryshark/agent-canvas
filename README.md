@@ -214,7 +214,7 @@ Viewing links carry a session-scoped credential in the URL fragment. The browser
 
 Agent-written HTML runs in an iframe with an opaque origin (`sandbox="allow-scripts"`) under a strict content security policy: no network requests, no access to Canvas credentials or the app's storage, no navigation of the app, no popups. Two network paths are outside any CSP: Chrome can prerender a `<link rel="prerender">` target, and WebRTC is not governed by CSP. Canvas rejects both when the agent shows a page, strips them when building it, and blocks the page from creating them at run time. Pages cannot embed frames (`<iframe>`, `<object>`, `<embed>`), since a nested frame would escape those run-time guards, and cannot navigate their own frame to a new document, which would leave them behind. In the OpenChamber pane that last block is the pane's own `frame-src 'none'` policy, tested against OpenChamber's real guest policy in a harness but not yet in the app. Treat a view as able to make a request in principle, and keep secrets out of what agents put on the canvas.
 
-Only the local plugin and the OpenChamber host service hold the broader agent credential. The HTTP service stays bound to loopback, rejects foreign browser origins, constrains viewer routes, and serves a fixed asset list under a restrictive content security policy. Tailscale provides the private HTTPS boundary.
+Only the local plugin and the OpenChamber host service hold the broader agent credential. The HTTP service stays bound to loopback, rejects foreign browser origins, serves the app only at its own addresses, constrains viewer routes, and serves a fixed asset list under a restrictive content security policy. Tailscale provides the private HTTPS boundary.
 
 ## Status and limits
 

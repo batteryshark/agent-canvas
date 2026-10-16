@@ -1,10 +1,10 @@
 # Agent Canvas 0.2 validation — 2026-10-15
 
-Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree, run by the lead after the build, integration, review and fix passes, again after the nested-frame fix (Q3), after the frame-navigation fix (Q4), and after the host notice for refused frame navigations.
+Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree, run by the lead after the build, integration, review and fix passes, again after the nested-frame fix (Q3), after the frame-navigation fix (Q4), after the host notice for refused frame navigations, and after the browser app's `frame-src` was narrowed to `/frame`.
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Types, unit tests, build | `npm run check` | 70/70 tests pass; build produces both packages with 4 bundled libraries |
+| Types, unit tests, build | `npm run check` | 71/71 tests pass; build produces both packages with 4 bundled libraries |
 | Browser (installed Chrome) | `npm run test:browser` | 36/36 pass |
 | Native OpenCode | `npm run test:native` | 18/18 checks pass on OpenCode 2.0.23 |
 | Native, OpenChamber's bundled OpenCode | `OPENCODE_BIN=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode node scripts/test-runtime.mjs` | 18/18 checks pass on 2.0.28 |
@@ -35,7 +35,7 @@ Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree
   - cannot open a link or send input without a real user click, which the host verifies, not the page;
   - cannot reach the network through prerender, preconnect, speculation rules or WebRTC, including through attribute nodes, a `document.write` split across calls, or after redefining built-ins;
   - cannot get a nested frame's window, or reach the network through that frame's WebRTC or prerender. Twenty run-time paths are tried (DOM creation, markup, split and spliced `document.write`, `DOMParser`, ranges, `execCommand`, declarative shadow roots, the `document.body` setter, redefined built-ins), each on a freshly loaded page in the browser and all together in the pane. The fixture counts STUN and TURN traffic as well as HTTP. With the guard removed, these tests fail: frames get windows and WebRTC reaches the fixture.
-  - cannot navigate its own frame to a new document and leave the bridge behind: a `data:` URL by `location`, by a link click kept from bubbling past the bridge, or by a meta refresh, a `blob:` URL, or an http URL (OpenChamber's own origin in the pane), each on a freshly loaded page. The frame never shows the new document, the app and pane stay put, and nothing reaches the fixture. The host replaces the frame with its notice, never reloads it, and the agent's `canvas_read` reports the navigation once. A page that reloads itself keeps its frame with no notice, and after a navigation on a click, "Show the page again" brings the page back. Without the panel's `frame-src 'none'`, the pane test fails: the `data:` document's WebRTC and prerender reach the fixture.
+  - cannot navigate its own frame to a new document and leave the bridge behind: a `data:` URL by `location`, by a link click kept from bubbling past the bridge, or by a meta refresh, a `blob:` URL, an http URL (OpenChamber's own origin in the pane), or, in the browser, another Canvas URL (`/api/snapshot`), each on a freshly loaded page. The frame never shows the new document, the app and pane stay put, and nothing reaches the fixture. The host replaces the frame with its notice, never reloads it, and the agent's `canvas_read` reports the navigation once. A page that reloads itself keeps its frame with no notice, and after a navigation on a click, "Show the page again" brings the page back. Without the panel's `frame-src 'none'`, the pane test fails: the `data:` document's WebRTC and prerender reach the fixture. With the browser app's old `frame-src 'self'`, the browser test fails: `/api/snapshot` loads with no notice.
 
   `canvas_show` also refuses static prerender links, speculation rules, WebRTC and nested frames. (Outside the suites, a one-off page using all four bundled libraries rendered without errors under the new guards.)
 - **State and delivery.**
