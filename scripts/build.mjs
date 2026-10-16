@@ -55,7 +55,12 @@ await compile({ ...node, entryPoints: ['src/openchamber/bridge.ts'], outfile: `$
 // OpenChamber panels must be classic scripts, so both surfaces get an IIFE. Fonts and images are inlined:
 // the service serves only index.html, app.js and app.css, and OpenChamber serves no font types.
 const assetLoaders = { '.woff': 'dataurl', '.woff2': 'dataurl', '.ttf': 'dataurl', '.otf': 'dataurl', '.png': 'dataurl', '.svg': 'dataurl', '.gif': 'dataurl' };
-const page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Agent Canvas</title><link rel="icon" href="data:,"><link rel="stylesheet" href="app.css"></head><body><div id="root"></div><script src="app.js"></script></body></html>\n';
+const page = (head = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8">${head}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Agent Canvas</title><link rel="icon" href="data:,"><link rel="stylesheet" href="app.css"></head><body><div id="root"></div><script src="app.js"></script></body></html>\n`;
+// OpenChamber's guest CSP lets the pane's frames load 'self', data: and blob:, so an HTML page could navigate its own
+// frame to a document the bridge never runs in (PROJECT.md Q4). The pane's only frame is the srcdoc page, which CSP does
+// not check, so the panel adds frame-src 'none'; browsers enforce it alongside the guest header. The browser surface's
+// app CSP (frame-src 'self', for /frame) is sent by the service.
+const PANEL_HEAD = `<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">`;
 for (const [surface, dir] of [['browser', `${OPENCODE}/web`], ['openchamber', `${OPENCHAMBER}/panel`]]) {
   await compile({
     entryPoints: ['src/ui/app.tsx'], outfile: `${dir}/app.js`, platform: 'browser', format: 'iife', target: 'es2022', minify: true,
@@ -64,7 +69,7 @@ for (const [surface, dir] of [['browser', `${OPENCODE}/web`], ['openchamber', `$
     plugins: [exposeOpenUITheme],
   });
   if (!await exists(`${dir}/app.css`)) fail(`${dir}/app.css was not produced. src/ui/app.tsx must import its stylesheets, including OpenUI's.`);
-  await writeFile(`${dir}/index.html`, page);
+  await writeFile(`${dir}/index.html`, page(surface === 'openchamber' ? PANEL_HEAD : ''));
 }
 
 const copiedPackages = new Set();

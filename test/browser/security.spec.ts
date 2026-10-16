@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Page } from '@playwright/test';
 import { TITLES } from './seeds';
-import { BEACON, beacons, htmlFrame, openView, received, seed, show, viewUrl } from './helpers';
+import { BEACON, beacons, htmlFrame, openView, received, seed, show, sidebar, viewUrl } from './helpers';
 
 const BLOCKED = ['fetchService', 'fetchRemote', 'parentDocument', 'parentLocalStorage', 'parentSessionStorage', 'ownLocalStorage', 'ownSessionStorage', 'cookie', 'popup'];
 
@@ -162,6 +162,27 @@ const spliced = (written: string, rest: string) => `<!doctype html><html lang="e
 <script>document.documentElement.dataset.windows = String(window.length); document.documentElement.dataset.done = 'yes';</script>
 </body></html>`;
 
+// A page that replaces its own frame's document leaves the bridge behind: the new document's WebRTC and prerender would
+// reach the network. Each try navigates the frame a different way, with no click, once the Canvas page has shown.
+const LEAVING_TRIES: Record<string, string> = {
+  location: "location.href = dataUrl('location');",
+  // The click never bubbles to the bridge's listener on window, which would otherwise take the link.
+  anchor: "const a = document.createElement('a'); a.href = dataUrl('anchor'); a.textContent = 'Leave'; document.body.appendChild(a); a.addEventListener('click', event => event.stopPropagation()); a.click();",
+  metaRefresh: "const m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=' + dataUrl('meta-refresh'); document.head.appendChild(m);",
+  blob: "location.href = URL.createObjectURL(new Blob([escaped('blob')], { type: 'text/html' }));",
+  // In the pane this is OpenChamber's own origin, which the guest policy allows as 'self'.
+  http: "location.href = base + 'navigation';",
+};
+const leaving = (name: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Leaving</title></head><body>
+<p id="home">Canvas page</p>
+<script>
+  const base = '${BEACON}', pre = 'pre' + 'render';
+  const ICE = [{ urls: ['stun:127.0.0.1:4319', 'turn:127.0.0.1:4319?transport=tcp'], username: 'canvas', credential: 'probe' }];
+  const escaped = label => '<!doctype html><title>Escaped</title><p id="escaped">' + label + '</p><li' + 'nk rel="' + pre + '" href="' + base + label + '"><scr' + 'ipt>try{var pc=new window["RTC"+"PeerConnection"]({iceServers:' + JSON.stringify(ICE) + '});pc.createDataChannel("x");pc.createOffer().then(function(o){return pc.setLocalDescription(o)});window.keep=pc}catch(e){}</scr' + 'ipt>';
+  const dataUrl = label => 'data:text/html,' + encodeURIComponent(escaped(label));
+  setTimeout(() => { try { ${LEAVING_TRIES[name]} } catch (error) {} }, 500);
+</script></body></html>`;
+
 for (const surface of ['browser', 'pane'] as const) {
   test(`in the ${surface}, a page cannot open a link or send input without the user's click`, async ({ page, request, context }) => {
     const popups: string[] = [];
@@ -223,6 +244,31 @@ for (const surface of ['browser', 'pane'] as const) {
       await expect(frame.locator('html'), name).toHaveAttribute('data-windows', '0');
       await page.waitForTimeout(2_000);
       expect(await beacons(request), name).toEqual([]);
+    }
+  });
+
+  test(`in the ${surface}, a page cannot navigate its own frame to a data:, blob: or http document`, async ({ page, request }) => {
+    test.setTimeout(120_000);
+    const s = await seed(request, `Leaving in the ${surface}`, []);
+    const scope = surface === 'browser' ? page : page.frameLocator('iframe[title="Agent Canvas pane"]');
+    for (const name of Object.keys(LEAVING_TRIES)) {
+      const title = `Leaving ${name}`;
+      const view = await show(request, s.sessionId, title, 'html', leaving(name));
+      const start = surface === 'browser' ? viewUrl(s.url, view.id) : `http://127.0.0.1:4319/harness?a=${s.sessionId}&b=${s.sessionId}`;
+      await page.goto('about:blank');
+      await page.goto(start);
+      const frame = htmlFrame(scope, title);
+      await expect(frame.locator('#home'), name).toBeAttached();
+      const app = page.url();
+      await page.waitForTimeout(2_000);
+      expect(await beacons(request), name).toEqual([]);
+      // The frame holds the Canvas page or, once Chrome refuses the navigation, its error page: never another document.
+      // The Canvas app, and the pane around it, stay where they were.
+      const canvas = [app, 'http://127.0.0.1:4318/frame', 'http://127.0.0.1:4319/api/guests/agent-canvas/panel/index.html', 'about:srcdoc'];
+      expect(page.frames().map(f => f.url()).filter(url => !canvas.includes(url) && !url.startsWith('chrome-error://')), name).toEqual([]);
+      await expect(frame.locator('#escaped'), name).toHaveCount(0);
+      expect(page.url(), name).toBe(app);
+      await expect(sidebar(scope).getByRole('button', { name: title }).first(), name).toBeVisible();
     }
   });
 }

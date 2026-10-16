@@ -56,7 +56,7 @@ Note: keep the old header
 A complete, self-contained HTML document. It runs in a nested iframe whose origin is opaque. CSP blocks every fetch and load the page can make; the paths CSP does not govern are refused in the source and guarded at run time (see **Network paths outside CSP**).
 
 - **Frame modes:**
-  - **Pane, `srcdoc`:** inherits the OpenChamber guest policy. Inline scripts run, remote scripts are blocked, the sandbox is `allow-scripts`.
+  - **Pane, `srcdoc`:** inherits the OpenChamber guest policy and the panel's own `frame-src 'none'` (see **Network paths outside CSP**). Inline scripts run, remote scripts are blocked, the sandbox is `allow-scripts`.
   - **Browser, `shell`:** iframe `src="/frame"`, `sandbox="allow-scripts"`. The service serves a static shell under its own CSP. The parent posts the built document, and the shell calls `document.open(); document.write(html); document.close()`. The shell's CSP stays in force.
 - **`/frame` CSP:** `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline' data: blob:; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; worker-src blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`. Same in spirit as the pane: nothing CSP governs reaches the network, so a page behaves the same on every surface (for what CSP does not govern, see **Network paths outside CSP**).
 - **Built document:** `buildDocument(source, options)` inserts at the top of `<head>`:
@@ -98,7 +98,11 @@ A complete, self-contained HTML document. It runs in a nested iframe whose origi
 
   The guards use only natives captured before page scripts run, called through `Reflect.apply`, so a page that redefines built-ins (`Function.prototype.call`, `RegExp.prototype.exec`, a node's own `localName`) cannot change their answers or obtain an unguarded native. They hold only while the page has no fresh realm, so a new browser API that creates a browsing context, or a DOM insertion path the bridge does not wrap, would reopen the gap until added here.
 
-  One path remains, in the pane only: a page can navigate its own frame to a `data:` URL (through `location`, a link click it keeps from bubbling, or a meta refresh). The new document has no bridge, so its WebRTC and prerender reach the network without a click. OpenChamber's guest CSP allows `frame-src 'self' data: blob:`; the browser surface's app CSP (`frame-src 'self'`) blocks it. See PROJECT.md Q4.
+  A page could also leave the guards behind by navigating its own frame to a new document (through `location`, a link click it keeps from bubbling past the bridge, or a meta refresh): the new document has no bridge. The `frame-src` of the document around the frame decides such a navigation, not the page's own policy:
+  - **Pane:** OpenChamber's guest CSP allows `frame-src 'self' data: blob:`, so the panel's `index.html` (written by `scripts/build.mjs` for the pane only) adds `<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">`. The browser enforces it together with the guest header, so every navigation of the HTML frame is refused. The `srcdoc` page itself is not fetched, so CSP does not check it. OpenChamber's relay mode renders the panel as `srcDoc` with the guest policy as its first `<meta>` and, by the SDK's documentation, keeps the panel's own CSP.
+  - **Browser:** the app CSP's `frame-src 'self'`, needed for `/frame`, refuses `data:` and `blob:`. `'self'` reaches only the Canvas service, which serves no HTML without a CSP: the app refuses framing (`frame-ancestors 'none'`), and `/frame` is the shell.
+
+  Chrome shows its error page in a frame whose navigation was refused. The page cannot be held in place instead: `location` cannot be wrapped, and the Navigation API fires no `navigate` event in an opaque-origin document. See PROJECT.md Q4.
 - **Message channel:** `{ channel: 'agent-canvas', v: 1, type, ... }`. The host accepts messages only when `event.source` is its own frame's `contentWindow`, and `send` and `link` only during a user gesture. Host → frame: `render` (shell mode), `theme`, `ack`. Frame → host: `ready`, `send`, `state`, `size`, `link`, `error`.
 - **Service-side `checkHtml(source)`:**
   - errors: empty source, an unknown `canvas:lib/NAME`, size over the limit, speculative links and speculation rules, WebRTC, nested frames;
@@ -248,7 +252,7 @@ export function deliverToSession(api: Pick<Plugin.Context['session'], 'get' | 'w
 
 `npm run build` runs `generate-openui`, then bundles:
 - `dist/opencode/`: `index.js` (plugin, ESM), `canvas-service.cjs`, `web/` (`index.html`, `app.js`, `app.css`, `lib/`), `package.json`, `README.md`, `THIRD_PARTY_NOTICES.md`.
-- `dist/openchamber/`: `panel/` (same app built with `__CANVAS_SURFACE__='openchamber'`, `lib/`), `service/main.cjs`, `package.json` manifest (validated with `parseManifestJson`), `README.md`, `THIRD_PARTY_NOTICES.md`.
+- `dist/openchamber/`: `panel/` (same app built with `__CANVAS_SURFACE__='openchamber'`, its `index.html` adding `frame-src 'none'`, `lib/`), `service/main.cjs`, `package.json` manifest (validated with `parseManifestJson`), `README.md`, `THIRD_PARTY_NOTICES.md`.
 
 Notices cover every bundled or copied package. The 0.1 approach in `git show HEAD:scripts/build.mjs` works.
 
@@ -266,6 +270,7 @@ Notices cover every bundled or copied package. The 0.1 approach in `git show HEA
   - mobile width at 390×844 with no horizontal overflow;
   - the pane harness: an iframe with `sandbox="allow-scripts"` serving the panel with the real OpenChamber guest CSP (`script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'self' data: blob:; frame-src 'self' data: blob:; …`), rendering both formats and delivering a send;
   - in both surfaces: a page cannot open a link or send without a click (through the bridge, by posting the bridge's messages, or after faking `navigator.userActivation`), and prerender, preconnect, speculation-rules and WebRTC attempts built at run time never reach the fixture's `/beacon/` listener, including through attribute nodes, a split `document.write`, or after the page redefines built-ins;
+  - in both surfaces: a page that navigates its own frame to a `data:` URL (by `location`, a link click kept from bubbling, or a meta refresh), a `blob:` URL or an http URL never shows the new document, and nothing reaches the fixture;
   - in both surfaces: no nested frame built at run time (by `createElement`, markup, `document.write` split across calls or finished by the page's own markup, `DOMParser`, ranges, `execCommand`, declarative shadow roots, the `document.body` setter, or after the page redefines built-ins) gets a window, and neither its WebRTC nor a prerender reaches the fixture; `canvas_show` refuses static frames;
   - a pinned page from another conversation never opens or sends on its own;
   - a lost submit answer is confirmed, not delivered twice; switching conversations mid-send keeps the input for its own conversation;
