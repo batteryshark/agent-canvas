@@ -1,11 +1,11 @@
 # Agent Canvas 0.2 validation — 2026-10-15
 
-Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree, run by the lead after the build, integration, review and fix passes.
+Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree, run by the lead after the build, integration, review and fix passes, and again after the nested-frame fix (Q3).
 
 | Suite | Command | Result |
 | --- | --- | --- |
-| Types, unit tests, build | `npm run check` | 69/69 tests pass; build produces both packages with 4 bundled libraries |
-| Browser (installed Chrome) | `npm run test:browser` | 29/29 pass |
+| Types, unit tests, build | `npm run check` | 70/70 tests pass; build produces both packages with 4 bundled libraries |
+| Browser (installed Chrome) | `npm run test:browser` | 32/32 pass |
 | Native OpenCode | `npm run test:native` | 18/18 checks pass on OpenCode 2.0.23 |
 | Native, OpenChamber's bundled OpenCode | `OPENCODE_BIN=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode node scripts/test-runtime.mjs` | 18/18 checks pass on 2.0.28 |
 
@@ -33,9 +33,10 @@ Version 0.2.0 is a hard-cutover rebuild. All three suites pass on the final tree
 - **Containment.** In the browser frame and in the pane, an agent-written page:
   - cannot fetch, reach the parent or its storage, or navigate the top window;
   - cannot open a link or send input without a real user click, which the host verifies, not the page;
-  - cannot reach the network through prerender, preconnect, speculation rules or WebRTC.
+  - cannot reach the network through prerender, preconnect, speculation rules or WebRTC, including through attribute nodes, a `document.write` split across calls, or after redefining built-ins;
+  - cannot get a nested frame's window, or reach the network through that frame's WebRTC or prerender. Twenty run-time paths are tried (DOM creation, markup, split and spliced `document.write`, `DOMParser`, ranges, `execCommand`, declarative shadow roots, the `document.body` setter, redefined built-ins), each on a freshly loaded page in the browser and all together in the pane. The fixture counts STUN and TURN traffic as well as HTTP. With the guard removed, these tests fail: frames get windows and WebRTC reaches the fixture.
 
-  `canvas_show` also refuses static prerender links, speculation rules and WebRTC.
+  `canvas_show` also refuses static prerender links, speculation rules, WebRTC and nested frames. (Outside the suites, a one-off page using all four bundled libraries rendered without errors under the new guards.)
 - **State and delivery.**
   - Drafts survive reloads in both formats, even immediately after typing.
   - Stale revisions are marked and cannot send.
@@ -62,4 +63,4 @@ All confirmed critical and major findings were fixed and are covered by tests. T
 - The rebuilt extension inside the real OpenChamber app. The pane is tested in a harness that reproduces its sandbox and guest CSP.
 - Safari and Firefox.
 - The Tailscale and physical-phone path for 0.2. The service and link format are unchanged from 0.1, which was verified on a phone.
-- Residual risk: a nested frame inside an HTML page gets fresh globals and escapes the run-time prerender and WebRTC guards (PROJECT.md Q3).
+- Residual risk: in the OpenChamber pane, a page can navigate its own frame to a `data:` URL and leave the bridge behind; its WebRTC and prerender then reach the network (PROJECT.md Q4). Reproduced in the pane harness; the browser surface blocks it.

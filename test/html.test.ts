@@ -88,6 +88,27 @@ test('checkHtml refuses network paths the frame CSP cannot close', () => {
   assert.equal(html.split('\n').findIndex(l => l.includes('id="after"')) - html.split('\n').findIndex(l => l.includes('<title>Test')), source.split('\n').findIndex(l => l.includes('id="after"')) - source.split('\n').findIndex(l => l.includes('<title>Test')));
 });
 
+test('checkHtml refuses nested frames, in markup and in script strings', () => {
+  for (const source of [page('<iframe src="https://www.youtube.com/embed/x"></iframe>'), page('<IFRAME srcdoc="<p>x</p>"></IFRAME>'), page('<object data="data:text/html,x"></object>'),
+    page('<embed src="x.svg">'), page('<frameset><frame src="about:blank"></frameset>'), page('<fencedframe></fencedframe>'),
+    page('<div id="v"></div><script>v.innerHTML = \'<iframe src="\' + url + \'">\';</script>')]) {
+    const errors = checkHtml(source).errors;
+    assert.equal(errors.length, 1, source);
+    assert.match(errors[0], /nested frames/);
+    assert.match(errors[0], /<a href>/);
+  }
+  for (const source of [page('<script>for (let i = 0; i<Object.keys(o).length; i++) {} const frames = [], x = a<embedded;</script>'), page('<p>&lt;iframe&gt; is not allowed</p>'),
+    page('<frameset-like></frameset-like><objective></objective>'), page('<p>x</p>', '<!-- <iframe src="https://x"></iframe> -->')]) {
+    assert.deepEqual(checkHtml(source).errors, [], source);
+  }
+  // A page saved before the rule is built without them, keeping its line numbers.
+  const source = page('<p id="after">x</p>', '<iframe\n srcdoc="<b>x</b>"></iframe>');
+  const html = buildDocument(source, options());
+  assert.ok(!/<iframe/i.test(html));
+  assert.ok(html.includes('<!-- removed by Agent Canvas: no nested frames -->\n'));
+  assert.equal(html.split('\n').findIndex(l => l.includes('id="after"')) - html.split('\n').findIndex(l => l.includes('<title>Test')), source.split('\n').findIndex(l => l.includes('id="after"')) - source.split('\n').findIndex(l => l.includes('<title>Test')));
+});
+
 test('library tags inside comments are ignored everywhere, as checkHtml ignores them', () => {
   const source = page('<p>x</p>', '<!-- old: <script src="canvas:lib/chartjs"></script> -->\n<script src="canvas:lib/d3"></script>');
   assert.deepEqual(checkHtml(source).errors, []);

@@ -53,19 +53,19 @@ Note: keep the old header
 
 ### HTML (`format: 'html'`)
 
-A complete, self-contained HTML document. It runs in a nested iframe whose origin is opaque. CSP blocks every fetch, load and navigation the page can make; two paths CSP does not govern are closed as far as a page can be (see **Residual network paths**).
+A complete, self-contained HTML document. It runs in a nested iframe whose origin is opaque. CSP blocks every fetch and load the page can make; the paths CSP does not govern are refused in the source and guarded at run time (see **Network paths outside CSP**).
 
 - **Frame modes:**
   - **Pane, `srcdoc`:** inherits the OpenChamber guest policy. Inline scripts run, remote scripts are blocked, the sandbox is `allow-scripts`.
   - **Browser, `shell`:** iframe `src="/frame"`, `sandbox="allow-scripts"`. The service serves a static shell under its own CSP. The parent posts the built document, and the shell calls `document.open(); document.write(html); document.close()`. The shell's CSP stays in force.
-- **`/frame` CSP:** `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline' data: blob:; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; worker-src blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`. Same in spirit as the pane: nothing CSP governs reaches the network, so a page behaves the same on every surface (for what CSP does not govern, see **Residual network paths**).
+- **`/frame` CSP:** `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline' data: blob:; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; worker-src blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`. Same in spirit as the pane: nothing CSP governs reaches the network, so a page behaves the same on every surface (for what CSP does not govern, see **Network paths outside CSP**).
 - **Built document:** `buildDocument(source, options)` inserts at the top of `<head>`:
   - a theme `<style>` defining OpenChamber-compatible variables on `:root`: `--background`, `--foreground`, `--muted`, `--muted-foreground`, `--card`, `--card-foreground`, `--border`, `--primary`, `--primary-foreground`, `--destructive`, `--warning`, `--success`, `--info`, `--chart-1`…`--chart-6`, `--radius`, `--font-sans`, `--font-mono`; plus `color-scheme`;
   - `<meta http-equiv="x-dns-prefetch-control" content="off">`;
   - the bridge `<script>`;
   - inlined bundled libraries.
 
-  It also replaces every speculative `<link>` and speculation-rules script (`speculativeTags` from `html-check.ts`) with a comment, keeping line numbers, and ignores library tags inside HTML comments, as `checkHtml` does.
+  It also replaces every nested-frame start tag (`frameTags`) and every speculative `<link>` and speculation-rules script (`speculativeTags`, both from `html-check.ts`) with a comment, keeping line numbers, and ignores library tags inside HTML comments, as `checkHtml` does.
 - **Bundled libraries:** a page asks for one with `<script src="canvas:lib/NAME"></script>`, which is replaced by the library inline before rendering. `HTML_LIBRARIES` maps names to files:
   - `tailwind`: `@tailwindcss/browser` `dist/index.global.js`
   - `chart.js`: `chart.js` `dist/chart.umd.min.js`
@@ -86,15 +86,22 @@ A complete, self-contained HTML document. It runs in a nested iframe whose origi
 - **Sizing:** a ResizeObserver posts the document height. The host sets the iframe height between 240 px and 85% of the viewport height, and the frame scrolls beyond that. A full-screen toggle fills the content area.
 - **Errors:** `window.onerror` and `unhandledrejection` are reported to the host, which posts them to `/api/report`. A page that cannot be built (an unknown or unloadable library) is reported the same way.
 - **Drafts:** form drafts are posted to the host as soon as a field changes (coalesced per task); the host stores them with a short delay and flushes when the app is hidden or unloads.
-- **Residual network paths.** Chrome starts a prerender (NoStatePrefetch) for `<link rel="prerender">` even under `default-src 'none'`, and CSP does not govern WebRTC, so a page could reach a server of its choosing without a click. Canvas closes these as far as a page allows:
-  - `checkHtml` rejects prerender, prefetch, dns-prefetch and preconnect links, speculation-rules scripts, and `RTCPeerConnection`/`RTCDataChannel`/`RTCIceTransport`;
+- **Network paths outside CSP.** Chrome starts a prerender (NoStatePrefetch) for `<link rel="prerender">` even under `default-src 'none'`, and CSP does not govern WebRTC, so a page could reach a server of its choosing without a click. A nested frame (a `srcdoc` iframe, `about:blank`, `<object>`, `<embed>`) would bring fresh globals that no run-time guard reaches, so pages cannot have one. Canvas closes all three:
+  - `checkHtml` rejects prerender, prefetch, dns-prefetch and preconnect links, speculation-rules scripts, `RTCPeerConnection`/`RTCDataChannel`/`RTCIceTransport`, and `<iframe>`, `<frame>`, `<object>`, `<embed>` and `<fencedframe>` start tags anywhere in the source, script strings included;
   - `buildDocument` strips such tags from older or obfuscated sources;
-  - before page scripts run, the bridge deletes the WebRTC constructors and guards every way to create such a link or script at run time (the `rel` and `type` setters, `relList`, `setAttribute`, node insertion, `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write`), with a `MutationObserver` as a backstop.
+  - before page scripts run, the bridge deletes the WebRTC constructors and guards every way to create a speculative link or script, or a frame, at run time:
+    - creation: `createElement` and `createElementNS` refuse frame names; the `rel` and `type` setters, `relList` and its token methods, `setAttribute(NS)`, and attribute nodes (`setAttributeNode`, `setNamedItem`, `Attr.value`) refuse speculative values;
+    - insertion: every node-insertion method (on `Node`, elements, text and doctype nodes, documents and fragments, `moveBefore`, `Range.insertNode`/`surroundContents`, the `document.body` setter) refuses a node that is or contains a frame, and scrubs speculative links before the node joins the document;
+    - markup: `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `setHTMLUnsafe`/`setHTML`, `Document.parseHTMLUnsafe`, `execCommand('insertHTML')` and `document.write` refuse any frame start tag, and parse link markup inert first, template contents (declarative shadow roots) included. `document.write` also refuses text that ends inside a tag, comment, script or style: the markup after it, from the next write or the page's own source, would finish the tag unchecked (`'<ifr'` then `'ame srcdoc=…>'`);
+    - `contentWindow`, `contentDocument` and `getSVGDocument` of frame elements return `null`;
+    - backstops: a `MutationObserver` on the document and every shadow root removes any frame and defuses any link that lands, and a capturing `load` listener removes a frame in its own synchronous load event, before page listeners run.
 
-  A nested frame (a `srcdoc` iframe or `about:blank`) gets fresh globals and escapes the bridge's guards, so these mitigations reduce the risk rather than remove it. The OpenChamber guest CSP has the same gap.
+  The guards use only natives captured before page scripts run, called through `Reflect.apply`, so a page that redefines built-ins (`Function.prototype.call`, `RegExp.prototype.exec`, a node's own `localName`) cannot change their answers or obtain an unguarded native. They hold only while the page has no fresh realm, so a new browser API that creates a browsing context, or a DOM insertion path the bridge does not wrap, would reopen the gap until added here.
+
+  One path remains, in the pane only: a page can navigate its own frame to a `data:` URL (through `location`, a link click it keeps from bubbling, or a meta refresh). The new document has no bridge, so its WebRTC and prerender reach the network without a click. OpenChamber's guest CSP allows `frame-src 'self' data: blob:`; the browser surface's app CSP (`frame-src 'self'`) blocks it. See PROJECT.md Q4.
 - **Message channel:** `{ channel: 'agent-canvas', v: 1, type, ... }`. The host accepts messages only when `event.source` is its own frame's `contentWindow`, and `send` and `link` only during a user gesture. Host → frame: `render` (shell mode), `theme`, `ack`. Frame → host: `ready`, `send`, `state`, `size`, `link`, `error`.
 - **Service-side `checkHtml(source)`:**
-  - errors: empty source, an unknown `canvas:lib/NAME`, size over the limit, speculative links and speculation rules, WebRTC;
+  - errors: empty source, an unknown `canvas:lib/NAME`, size over the limit, speculative links and speculation rules, WebRTC, nested frames;
   - warnings: remote `<script src>`, `<link href>` or `@import` (they will not load); `<form>` without `data-canvas-action`; `fetch(` or `XMLHttpRequest` (no network).
   - HTML comments are ignored for every check, and `libraryTags` ignores them too, so the service, the viewer and `buildDocument` agree on which libraries a page uses.
 
@@ -258,12 +265,13 @@ Notices cover every bundled or copied package. The 0.1 approach in `git show HEA
   - busy → unsent → retry → delivered;
   - mobile width at 390×844 with no horizontal overflow;
   - the pane harness: an iframe with `sandbox="allow-scripts"` serving the panel with the real OpenChamber guest CSP (`script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'self' data: blob:; frame-src 'self' data: blob:; …`), rendering both formats and delivering a send;
-  - in both surfaces: a page cannot open a link or send without a click (through the bridge, by posting the bridge's messages, or after faking `navigator.userActivation`), and prerender, preconnect, speculation-rules and WebRTC attempts built at run time never reach the fixture's `/beacon/` listener;
+  - in both surfaces: a page cannot open a link or send without a click (through the bridge, by posting the bridge's messages, or after faking `navigator.userActivation`), and prerender, preconnect, speculation-rules and WebRTC attempts built at run time never reach the fixture's `/beacon/` listener, including through attribute nodes, a split `document.write`, or after the page redefines built-ins;
+  - in both surfaces: no nested frame built at run time (by `createElement`, markup, `document.write` split across calls or finished by the page's own markup, `DOMParser`, ranges, `execCommand`, declarative shadow roots, the `document.body` setter, or after the page redefines built-ins) gets a window, and neither its WebRTC nor a prerender reaches the fixture; `canvas_show` refuses static frames;
   - a pinned page from another conversation never opens or sends on its own;
   - a lost submit answer is confirmed, not delivered twice; switching conversations mid-send keeps the input for its own conversation;
   - a required `DatePicker` east of UTC sends the picked day; KPI cards in a wrapping row wrap at 390 px without clipping.
 
-  The fixture can show any source (`POST /control/show`) and records requests to `/beacon/*` (`GET /control/beacons`).
+  The fixture can show any source (`POST /control/show`) and records requests to `/beacon/*`, plus WebRTC STUN and TURN traffic to its port (`GET /control/beacons`).
 
   The fixture drives the real plugin with a fake OpenCode 2 `ctx`.
 - `npm run test:native`: the real `opencode` 2 binary with isolated XDG directories and a local fixture model. The model calls `canvas_guide`, then `canvas_show` (openui, then html). The test then checks:

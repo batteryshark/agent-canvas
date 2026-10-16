@@ -7,6 +7,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
+import { createSocket } from 'node:dgram';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -320,6 +321,15 @@ const server = createServer(async (req, res) => {
     json(res, 500, { error: (error as Error).message });
   }
 });
+// WebRTC is not HTTP: a page's STUN and TURN traffic to 4319 also counts as a beacon (UDP datagrams, and TCP bytes
+// the HTTP parser rejects).
+server.on('clientError', (error: NodeJS.ErrnoException, socket) => {
+  if (error.code?.startsWith('HPE_')) beacons.push(`non-HTTP TCP bytes on ${FIXTURE_PORT} (${error.code})`);
+  socket.destroy();
+});
+const stun = createSocket('udp4');
+stun.on('message', (message, from) => beacons.push(`UDP datagram of ${message.length} bytes on ${FIXTURE_PORT} from ${from.address}`));
+await new Promise<void>(done => stun.bind(FIXTURE_PORT, '127.0.0.1', done));
 await new Promise<void>(done => server.listen(FIXTURE_PORT, '127.0.0.1', done));
 
 mkdirSync(join(root, '.runtime'), { recursive: true });

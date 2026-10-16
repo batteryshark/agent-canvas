@@ -123,99 +123,280 @@ document.addEventListener('securitypolicyviolation', function (event) {
   if (url && url !== 'inline' && url !== 'eval') blockedResource(url, directiveKind(event.effectiveDirective || event.violatedDirective));
 });
 
-// Two network paths the frame CSP cannot close: Chrome prerenders and preconnects for these link types and speculation
-// rules even under default-src 'none', and CSP does not govern WebRTC at all. checkHtml refuses them in the source; these
-// guards catch pages that build them at run time. A nested frame gets fresh globals and escapes them, so they reduce the
-// risk rather than remove it.
+// Network paths the frame CSP cannot close. Chrome prerenders and preconnects for these link types and speculation rules
+// even under default-src 'none', and CSP does not govern WebRTC at all. A nested frame (iframe, frame, object, embed)
+// would bring fresh globals that none of these guards reach, so a page cannot have one. checkHtml refuses all of them in
+// the source; the guards below catch pages that build them at run time. They run before any page script and use only
+// natives captured here, called through Reflect.apply, so a page that redefines built-ins (Function.prototype.call,
+// RegExp.prototype.exec, a node's own localName) neither changes their answers nor gets hold of an unguarded native.
 ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCIceTransport', 'RTCSctpTransport', 'RTCDtlsTransport'].forEach(function (name) {
   try { delete window[name]; Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false }); } catch (error) { /* already gone */ }
 });
+var apply = Reflect.apply, defineProperty = Object.defineProperty, ownDescriptor = Object.getOwnPropertyDescriptor, toText = String, Refusal = TypeError;
+var regExec = RegExp.prototype.exec, lower = String.prototype.toLowerCase, sliceText = String.prototype.slice, lastIndexOf = String.prototype.lastIndexOf, copyList = Array.prototype.slice;
+var weakHas = WeakSet.prototype.has, weakAdd = WeakSet.prototype.add;
+function getter(proto, name) { var d = proto && ownDescriptor(proto, name); return d && d.get; }
+var nodeTypeOf = getter(Node.prototype, 'nodeType'), localNameOf = getter(Element.prototype, 'localName'), listLength = getter(NodeList.prototype, 'length');
+var firstChildOf = getter(Node.prototype, 'firstChild'), nextSiblingOf = getter(Node.prototype, 'nextSibling'), dataOf = getter(CharacterData.prototype, 'data');
+var attrNameOf = getter(Attr.prototype, 'localName'), attrValueOf = getter(Attr.prototype, 'value'), contentOf = getter(HTMLTemplateElement.prototype, 'content');
+var nativeGetAttribute = Element.prototype.getAttribute, nativeSetAttribute = Element.prototype.setAttribute, nativeSetAttributeNS = Element.prototype.setAttributeNS;
+var nativeRemoveAttribute = Element.prototype.removeAttribute, nativeRemove = Element.prototype.remove;
+var queryElement = Element.prototype.querySelector, queryElementAll = Element.prototype.querySelectorAll;
+var queryFragment = DocumentFragment.prototype.querySelector, queryFragmentAll = DocumentFragment.prototype.querySelectorAll;
+
+function matches(pattern, text) { return apply(regExec, pattern, [text]) !== null; }
+function lowerText(text) { return apply(lower, text, []); }
+function nodeType(value) {
+  if (value === null || typeof value !== 'object') return 0;
+  try { return apply(nodeTypeOf, value, []); } catch (error) { return 0; }
+}
+function nameOf(el) { return lowerText(apply(localNameOf, el, [])); }
+function queryFirst(root, selector) {
+  var type = nodeType(root);
+  return type === 1 ? apply(queryElement, root, [selector]) : type === 11 ? apply(queryFragment, root, [selector]) : null;
+}
+function queryEach(root, selector, visit) {
+  var type = nodeType(root), list = type === 1 ? apply(queryElementAll, root, [selector]) : type === 11 ? apply(queryFragmentAll, root, [selector]) : null;
+  if (list) for (var i = 0, n = apply(listLength, list, []); i < n; i++) visit(list[i]);
+}
+function quietly(message) { try { report(message); } catch (error) { /* the refusal stands */ } }
+
+var FRAME_SELECTOR = 'iframe, frame, object, embed, fencedframe', FRAME_MARKUP = /<(?:iframe|frame|object|embed|fencedframe)[\t\n\f\r \/>]/i;
+var FRAME_REFUSAL = 'Agent Canvas blocked a nested frame (iframe, frame, object or embed): Canvas pages cannot embed frames. Build the content in the page itself, and link to other sites with <a href>.';
+function isFrameName(name) {
+  name = lowerText(name);
+  return name === 'iframe' || name === 'frame' || name === 'object' || name === 'embed' || name === 'fencedframe';
+}
+function isFrame(node) { return nodeType(node) === 1 && isFrameName(apply(localNameOf, node, [])); }
+function refuseFrame() { quietly(FRAME_REFUSAL); return new Refusal(FRAME_REFUSAL); }
+function removeFrame(el) { apply(nativeRemove, el, []); quietly(FRAME_REFUSAL); }
+
 var SPECULATIVE_REL = /(?:^|\s)(?:prerender|prefetch|dns-prefetch|preconnect)(?:\s|$)/i, SPECULATION_TYPE = /^\s*speculationrules\s*$/i;
-var nativeSetAttribute = Element.prototype.setAttribute, nativeSetAttributeNS = Element.prototype.setAttributeNS, nativeRemoveAttribute = Element.prototype.removeAttribute;
-function refuse() { report('Agent Canvas blocked a prerender, prefetch, preconnect or speculation rule: Canvas pages have no network access.'); }
-function allowedAttribute(el, name, value) {
-  name = String(name).toLowerCase();
-  if (el && el.localName === 'link' && name === 'rel') return !SPECULATIVE_REL.test(String(value));
-  if (el && el.localName === 'script' && name === 'type') return !SPECULATION_TYPE.test(String(value));
-  return true;
+function refuse() { quietly('Agent Canvas blocked a prerender, prefetch, preconnect or speculation rule: Canvas pages have no network access.'); }
+// By attribute name alone, since an attribute node can get its value before it has an element.
+function speculative(name, value) {
+  name = lowerText(name);
+  return (name === 'rel' && matches(SPECULATIVE_REL, value)) || (name === 'type' && matches(SPECULATION_TYPE, value));
 }
 function neutralize(el) {
-  if (!el || el.nodeType !== 1) return;
-  if (el.localName === 'link' && !allowedAttribute(el, 'rel', el.getAttribute('rel') || '')) { nativeRemoveAttribute.call(el, 'rel'); refuse(); }
-  else if (el.localName === 'script' && !allowedAttribute(el, 'type', el.getAttribute('type') || '')) { nativeSetAttribute.call(el, 'type', 'text/plain'); refuse(); }
+  if (nodeType(el) !== 1) return;
+  var name = nameOf(el), value;
+  if (name === 'link' && (value = apply(nativeGetAttribute, el, ['rel'])) !== null && speculative('rel', value)) { apply(nativeRemoveAttribute, el, ['rel']); refuse(); }
+  else if (name === 'script' && (value = apply(nativeGetAttribute, el, ['type'])) !== null && speculative('type', value)) { apply(nativeSetAttribute, el, ['type', 'text/plain']); refuse(); }
 }
+// Speculative links and scripts in a subtree, template contents (declarative shadow roots) included.
 function scrub(node) {
-  if (!node || (node.nodeType !== 1 && node.nodeType !== 11)) return;
   neutralize(node);
-  if (node.querySelectorAll) each.call(node.querySelectorAll('link[rel], script[type]'), neutralize);
+  queryEach(node, 'link[rel], script[type], template', function (el) {
+    if (nameOf(el) !== 'template') { neutralize(el); return; }
+    var content = null;
+    try { content = apply(contentOf, el, []); } catch (error) { /* not an HTML template */ }
+    if (content) scrub(content);
+  });
 }
-Element.prototype.setAttribute = function (name, value) {
-  if (!allowedAttribute(this, name, value)) { refuse(); return; }
-  return nativeSetAttribute.call(this, name, value);
-};
-Element.prototype.setAttributeNS = function (namespace, name, value) {
-  if (!allowedAttribute(this, String(name).split(':').pop(), value)) { refuse(); return; }
-  return nativeSetAttributeNS.call(this, namespace, name, value);
-};
-function guardSetter(proto, property, check) {
-  var d = proto && Object.getOwnPropertyDescriptor(proto, property);
-  if (!d || !d.set) return;
-  Object.defineProperty(proto, property, { configurable: true, enumerable: d.enumerable, get: d.get, set: function (value) {
-    if (!check(this, value)) { refuse(); return; }
-    d.set.call(this, value);
-  } });
-}
-guardSetter(HTMLLinkElement.prototype, 'rel', function (el, value) { return allowedAttribute(el, 'rel', value); });
-guardSetter(HTMLScriptElement.prototype, 'type', function (el, value) { return allowedAttribute(el, 'type', value); });
-guardSetter(HTMLLinkElement.prototype, 'relList', function (el, value) { return allowedAttribute(el, 'rel', value); });
-// relList belongs to its link; remember which lists those are so their token methods can be checked.
-var relLists = new WeakSet(), relListGet = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, 'relList');
-if (relListGet && relListGet.get) Object.defineProperty(HTMLLinkElement.prototype, 'relList', { configurable: true, enumerable: relListGet.enumerable, set: relListGet.set, get: function () {
-  var list = relListGet.get.call(this); relLists.add(list); return list;
-} });
-['add', 'toggle', 'replace'].forEach(function (method) {
-  var native = DOMTokenList.prototype[method];
-  DOMTokenList.prototype[method] = function () {
-    if (relLists.has(this) && Array.prototype.some.call(arguments, function (token) { return SPECULATIVE_REL.test(String(token)); })) { refuse(); return false; }
-    return native.apply(this, arguments);
+
+// Creation and attributes.
+[[Document.prototype, 'createElement', 0], [Document.prototype, 'createElementNS', 1]].forEach(function (entry) {
+  var native = entry[0][entry[1]], at = entry[2];
+  entry[0][entry[1]] = function () {
+    var args = apply(copyList, arguments, []);
+    if (args.length > at) {
+      var name = args[at] = toText(args[at]), colon = apply(lastIndexOf, name, [':']);
+      if (isFrameName(colon < 0 ? name : apply(sliceText, name, [colon + 1]))) throw refuseFrame();
+    }
+    return apply(native, this, args);
   };
 });
-guardSetter(DOMTokenList.prototype, 'value', function (list, value) { return !relLists.has(list) || !SPECULATIVE_REL.test(String(value)); });
-// Insertion: scrub a node and its subtree before it joins the document, where a link would start loading at once.
-[[Node.prototype, ['appendChild', 'insertBefore', 'replaceChild']], [Element.prototype, ['append', 'prepend', 'before', 'after', 'replaceWith', 'insertAdjacentElement', 'replaceChildren']],
-  [Document.prototype, ['append', 'prepend', 'replaceChildren']], [DocumentFragment.prototype, ['append', 'prepend', 'replaceChildren']]].forEach(function (entry) {
+// No path above is left to put a frame in the document; if one lands anyway, its window still stays out of reach.
+[typeof HTMLIFrameElement === 'function' && HTMLIFrameElement, typeof HTMLFrameElement === 'function' && HTMLFrameElement,
+  typeof HTMLObjectElement === 'function' && HTMLObjectElement, typeof HTMLEmbedElement === 'function' && HTMLEmbedElement].forEach(function (type) {
+  if (!type) return;
+  ['contentWindow', 'contentDocument'].forEach(function (name) {
+    var d = ownDescriptor(type.prototype, name);
+    if (d && d.get) defineProperty(type.prototype, name, { configurable: false, enumerable: d.enumerable, get: function () { return null; } });
+  });
+  if (typeof type.prototype.getSVGDocument === 'function') defineProperty(type.prototype, 'getSVGDocument', { configurable: false, writable: false, enumerable: true, value: function () { return null; } });
+});
+Element.prototype.setAttribute = function (name, value) {
+  name = toText(name); value = toText(value);
+  if (speculative(name, value)) { refuse(); return; }
+  return apply(nativeSetAttribute, this, [name, value]);
+};
+Element.prototype.setAttributeNS = function (namespace, name, value) {
+  name = toText(name); value = toText(value);
+  var colon = apply(lastIndexOf, name, [':']);
+  if (speculative(colon < 0 ? name : apply(sliceText, name, [colon + 1]), value)) { refuse(); return; }
+  return apply(nativeSetAttributeNS, this, [namespace, name, value]);
+};
+[[Element.prototype, ['setAttributeNode', 'setAttributeNodeNS']], [NamedNodeMap.prototype, ['setNamedItem', 'setNamedItemNS']]].forEach(function (entry) {
   entry[1].forEach(function (method) {
     var native = entry[0][method];
     if (typeof native !== 'function') return;
-    entry[0][method] = function () { each.call(arguments, function (node) { if (node && typeof node === 'object') scrub(node); }); return native.apply(this, arguments); };
+    entry[0][method] = function (attr) {
+      if (nodeType(attr) === 2 && speculative(apply(attrNameOf, attr, []), apply(attrValueOf, attr, []))) { refuse(); return null; }
+      return apply(native, this, arguments);
+    };
   });
 });
-// Markup strings: parse them inert first when they could hold a speculative link.
-var template = document.createElement('template'), innerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
-function cleanMarkup(html) {
-  html = String(html);
-  if (!/<link|speculationrules/i.test(html)) return html;
-  innerHTML.set.call(template, html);
-  scrub(template.content);
-  return innerHTML.get.call(template);
+function guardSetter(proto, property, convert) {
+  var d = proto && ownDescriptor(proto, property);
+  if (!d || !d.set) return;
+  defineProperty(proto, property, { configurable: true, enumerable: d.enumerable, get: d.get, set: function (value) {
+    var checked = convert(this, value);
+    if (checked.refuse) { refuse(); return; }
+    apply(d.set, this, [checked.value]);
+  } });
 }
-[[Element.prototype, 'innerHTML'], [Element.prototype, 'outerHTML'], [typeof ShadowRoot === 'function' ? ShadowRoot.prototype : null, 'innerHTML']].forEach(function (entry) {
-  var d = entry[0] && Object.getOwnPropertyDescriptor(entry[0], entry[1]);
-  if (d && d.set) Object.defineProperty(entry[0], entry[1], { configurable: true, enumerable: d.enumerable, get: d.get, set: function (html) { d.set.call(this, cleanMarkup(html)); } });
+function textCheck(name) {
+  return function (target, value) { value = toText(value); return { value: value, refuse: speculative(name, value) }; };
+}
+guardSetter(HTMLLinkElement.prototype, 'rel', textCheck('rel'));
+guardSetter(HTMLScriptElement.prototype, 'type', textCheck('type'));
+guardSetter(HTMLLinkElement.prototype, 'relList', textCheck('rel'));
+// An attribute node's value, however it is set.
+[[Attr.prototype, 'value', false], [Node.prototype, 'nodeValue', true], [Node.prototype, 'textContent', true]].forEach(function (entry) {
+  var nullIsEmpty = entry[2];
+  guardSetter(entry[0], entry[1], function (target, value) {
+    if (nodeType(target) !== 2) return { value: value, refuse: false };
+    value = value === null && nullIsEmpty ? '' : toText(value);
+    return { value: value, refuse: speculative(apply(attrNameOf, target, []), value) };
+  });
 });
-[[Element.prototype, 'insertAdjacentHTML', 1], [Element.prototype, 'setHTMLUnsafe', 0], [Document.prototype, 'write', -1], [Document.prototype, 'writeln', -1]].forEach(function (entry) {
-  var native = entry[0][entry[1]], at = entry[2];
-  if (typeof native !== 'function') return;
-  entry[0][entry[1]] = function () {
-    var args = Array.prototype.slice.call(arguments);
-    if (at < 0) args = [cleanMarkup(args.join(''))]; else args[at] = cleanMarkup(args[at]);
-    return native.apply(this, args);
+// relList belongs to its link; remember which lists those are so their token methods can be checked.
+var relLists = new WeakSet(), relListGet = ownDescriptor(HTMLLinkElement.prototype, 'relList');
+if (relListGet && relListGet.get) defineProperty(HTMLLinkElement.prototype, 'relList', { configurable: true, enumerable: relListGet.enumerable, set: relListGet.set, get: function () {
+  var list = apply(relListGet.get, this, []); apply(weakAdd, relLists, [list]); return list;
+} });
+[['add', Infinity], ['toggle', 1], ['replace', 2]].forEach(function (entry) {
+  var native = DOMTokenList.prototype[entry[0]], tokenCount = entry[1];
+  DOMTokenList.prototype[entry[0]] = function () {
+    var args = apply(copyList, arguments, []), i;
+    for (i = 0; i < args.length && i < tokenCount; i++) args[i] = toText(args[i]);
+    if (apply(weakHas, relLists, [this])) for (i = 0; i < args.length && i < tokenCount; i++) if (matches(SPECULATIVE_REL, args[i])) { refuse(); return false; }
+    return apply(native, this, args);
   };
 });
-// Anything else (attribute nodes, parser-inserted markup) is caught as soon as it lands.
-new MutationObserver(function (records) {
-  records.forEach(function (record) { if (record.type === 'attributes') neutralize(record.target); else each.call(record.addedNodes, scrub); });
-}).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['rel', 'type'] });
+guardSetter(DOMTokenList.prototype, 'value', function (list, value) {
+  value = toText(value);
+  return { value: value, refuse: apply(weakHas, relLists, [list]) && matches(SPECULATIVE_REL, value) };
+});
+
+// Insertion: a frame never joins any tree, and a subtree is scrubbed before it joins the document, where a link would
+// start loading at once.
+function guardNodes(nodes) {
+  var i, n = nodes.length;
+  for (i = 0; i < n; i++) if (isFrame(nodes[i]) || queryFirst(nodes[i], FRAME_SELECTOR) !== null) throw refuseFrame();
+  for (i = 0; i < n; i++) scrub(nodes[i]);
+}
+[[Node.prototype, ['appendChild', 'insertBefore', 'replaceChild']],
+  [Element.prototype, ['append', 'prepend', 'before', 'after', 'replaceWith', 'insertAdjacentElement', 'replaceChildren', 'moveBefore']],
+  [CharacterData.prototype, ['before', 'after', 'replaceWith']], [DocumentType.prototype, ['before', 'after', 'replaceWith']],
+  [Document.prototype, ['append', 'prepend', 'replaceChildren', 'moveBefore']], [DocumentFragment.prototype, ['append', 'prepend', 'replaceChildren', 'moveBefore']],
+  [Range.prototype, ['insertNode', 'surroundContents']]].forEach(function (entry) {
+  entry[1].forEach(function (method) {
+    var native = entry[0][method];
+    if (typeof native !== 'function') return;
+    entry[0][method] = function () { guardNodes(arguments); return apply(native, this, arguments); };
+  });
+});
+var body = ownDescriptor(Document.prototype, 'body');
+if (body && body.set) defineProperty(Document.prototype, 'body', { configurable: true, enumerable: body.enumerable, get: body.get, set: function (value) {
+  guardNodes([value]); apply(body.set, this, [value]);
+} });
+
+// Markup strings: a frame tag is refused outright, and markup that could hold a speculative link is parsed inert first.
+var template = document.createElement('template'), innerHTML = ownDescriptor(Element.prototype, 'innerHTML'), SPECULATIVE_MARKUP = /<link|speculationrules/i;
+function cleanMarkup(html) {
+  if (matches(FRAME_MARKUP, html)) throw refuseFrame();
+  if (!matches(SPECULATIVE_MARKUP, html)) return html;
+  apply(innerHTML.set, template, [html]);
+  scrub(apply(contentOf, template, []));
+  return apply(innerHTML.get, template, []);
+}
+[[Element.prototype, 'innerHTML'], [Element.prototype, 'outerHTML'], [typeof ShadowRoot === 'function' ? ShadowRoot.prototype : null, 'innerHTML']].forEach(function (entry) {
+  guardSetter(entry[0], entry[1], function (target, html) { return { value: cleanMarkup(html === null ? '' : toText(html)), refuse: false }; });
+});
+[[Element.prototype, 'insertAdjacentHTML', 1], [Element.prototype, 'setHTMLUnsafe', 0], [Element.prototype, 'setHTML', 0],
+  [typeof ShadowRoot === 'function' ? ShadowRoot.prototype : null, 'setHTMLUnsafe', 0], [typeof ShadowRoot === 'function' ? ShadowRoot.prototype : null, 'setHTML', 0],
+  [Document, 'parseHTMLUnsafe', 0], [Document, 'parseHTML', 0], [Document.prototype, 'execCommand', 2]].forEach(function (entry) {
+  var native = entry[0] && entry[0][entry[1]], at = entry[2], command = entry[1] === 'execCommand';
+  if (typeof native !== 'function') return;
+  entry[0][entry[1]] = function () {
+    var args = apply(copyList, arguments, []);
+    if (command && args.length) args[0] = toText(args[0]);
+    if (args.length > at && (!command || lowerText(args[0]) === 'inserthtml')) args[at] = cleanMarkup(toText(args[at]));
+    return apply(native, this, args);
+  };
+});
+// document.write: each call must also leave the parser between tags. A tag left open would be finished by whatever
+// markup follows (the next write, or the page's own source after the script), which no check here sees: '<ifr' then
+// 'ame srcdoc=...>' is an iframe, and so is '<' then 'iframe srcdoc=...>'. The probe starts with a letter, which a
+// pending '<' turns into a tag name, then a comment, which survives only if the parser is between tags.
+var WRITE_PROBE = 'canvas-write-end-' + Math.random().toString(36).slice(2);
+var WRITE_REFUSAL = 'Agent Canvas blocked a document.write call that ends inside a tag, comment, script or style: write whole elements in each call.';
+function hasComment(node, data) {
+  for (var child = apply(firstChildOf, node, []); child; child = apply(nextSiblingOf, child, [])) {
+    var type = apply(nodeTypeOf, child, []), inside = child;
+    if (type === 8 && apply(dataOf, child, []) === data) return true;
+    if (type !== 1) continue;
+    if (nameOf(child) === 'template') try { inside = apply(contentOf, child, []); } catch (error) { /* not an HTML template */ }
+    if (hasComment(inside, data)) return true;
+  }
+  return false;
+}
+function cleanWrite(text) {
+  text = cleanMarkup(text);
+  apply(innerHTML.set, template, [text + 'x<' + '!--' + WRITE_PROBE + '-->']);
+  if (!hasComment(apply(contentOf, template, []), WRITE_PROBE)) { quietly(WRITE_REFUSAL); throw new Refusal(WRITE_REFUSAL); }
+  return text;
+}
+// A frame that lands anyway is removed in its own synchronous load event, before any page listener runs. document.open
+// erases window listeners, so writing and opening arm it again.
+var nativeAddListener = EventTarget.prototype.addEventListener, targetOf = getter(Event.prototype, 'target'), nativeStopImmediate = Event.prototype.stopImmediatePropagation;
+function loadGuard(event) {
+  var target = apply(targetOf, event, []);
+  if (isFrame(target)) { apply(nativeStopImmediate, event, []); removeFrame(target); }
+}
+function armLoadGuard() { apply(nativeAddListener, window, ['load', loadGuard, true]); }
+armLoadGuard();
+[[Document.prototype, 'write'], [Document.prototype, 'writeln']].forEach(function (entry) {
+  var native = entry[0][entry[1]];
+  if (typeof native !== 'function') return;
+  entry[0][entry[1]] = function () {
+    var text = '';
+    for (var i = 0; i < arguments.length; i++) text += toText(arguments[i]);
+    try { return apply(native, this, [cleanWrite(text)]); } finally { armLoadGuard(); }
+  };
+});
+var nativeOpen = Document.prototype.open;
+Document.prototype.open = function () {
+  try { return apply(nativeOpen, this, arguments); } finally { armLoadGuard(); }
+};
+// Anything else (parser-inserted markup, a path not listed here) is caught as soon as it lands, in shadow roots too.
+var recordType = getter(MutationRecord.prototype, 'type'), recordTarget = getter(MutationRecord.prototype, 'target'), recordAdded = getter(MutationRecord.prototype, 'addedNodes');
+function backstop(node) {
+  if (isFrame(node)) { removeFrame(node); return; }
+  queryEach(node, FRAME_SELECTOR, removeFrame);
+  scrub(node);
+}
+var observer = new MutationObserver(function (records) {
+  for (var i = 0; i < records.length; i++) {
+    try {
+      var record = records[i];
+      if (apply(recordType, record, []) === 'attributes') { neutralize(apply(recordTarget, record, [])); continue; }
+      var added = apply(recordAdded, record, []);
+      for (var j = 0, n = apply(listLength, added, []); j < n; j++) backstop(added[j]);
+    } catch (error) { /* keep checking the rest */ }
+  }
+});
+var OBSERVED = Object.create(null), nativeObserve = MutationObserver.prototype.observe, nativeAttachShadow = Element.prototype.attachShadow;
+OBSERVED.subtree = true; OBSERVED.childList = true; OBSERVED.attributes = true; OBSERVED.attributeFilter = ['rel', 'type'];
+apply(nativeObserve, observer, [document, OBSERVED]);
+if (typeof nativeAttachShadow === 'function') Element.prototype.attachShadow = function () {
+  var root = apply(nativeAttachShadow, this, arguments);
+  try { apply(nativeObserve, observer, [root, OBSERVED]); } catch (error) { /* only the backstop misses this root */ }
+  return root;
+};
 
 var pending = {}, counter = 0;
 var GESTURE_SEND = 'canvas.send works only from a click or key press in the page, not on load or from a timer, so nothing reaches the conversation without the user.';

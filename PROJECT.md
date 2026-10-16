@@ -31,7 +31,7 @@ A general-purpose visual surface for OpenCode agents. An agent can build anythin
 - Remote and mobile access through private Tailscale Serve.
 - Every view and interaction is bound to its host, project, session, and revision. Stale revisions cannot submit. Concurrent edits to a project view conflict rather than overwrite.
 - Drafts (partially filled forms) survive reloads and reconnects; delivery states are shown honestly: queued, sending, delivered, unsent with retry, uncertain.
-- HTML views cannot reach the network, cannot read Canvas credentials, and cannot navigate the parent. Bundled libraries replace CDNs. Residual risk: Chrome prerenders and WebRTC are outside CSP; Canvas refuses and guards them, but a nested frame inside a page can still escape those guards (see Risks).
+- HTML views cannot reach the network, cannot read Canvas credentials, and cannot navigate the parent. Bundled libraries replace CDNs. Chrome prerenders and WebRTC are outside CSP; Canvas refuses and guards them, and refuses nested frames, which would escape those guards. Residual risk: in the OpenChamber pane a page can navigate its own frame to a `data:` URL (Q4).
 - Nothing reaches the conversation or opens a link without the user: HTML pages send and open links only during a click or key press in the page, verified by the host; a project view written in another conversation never opens on its own.
 
 ## Constraints
@@ -47,11 +47,12 @@ A general-purpose visual surface for OpenCode agents. An agent can build anythin
 ## Open questions
 - Q1 [resolved]: HTML views render in the pane as nested `srcdoc` frames, which inherit OpenChamber's guest policy (inline scripts run, remote scripts and frames are blocked). The browser uses a `/frame` shell with an equivalent policy, so pages behave the same everywhere; libraries are bundled instead of loaded from CDNs.
 - Q2 [resolved]: No. OpenChamber's `contributes.tools` is declarative (title and output format only); its own `openchamber_render` view is matched by tool name internally. Canvas tool calls show a title and a markdown result with the viewing link.
-- Q3: Nested frames inside an HTML page get fresh globals and escape the run-time prerender and WebRTC guards. Blocking frame creation in the bridge would close this; not done yet.
+- Q3 [resolved]: Nested frames would get fresh globals and escape the run-time prerender and WebRTC guards, so pages cannot have them. `canvas_show` refuses `<iframe>`, `<frame>`, `<object>` and `<embed>`, and the bridge blocks creating or inserting one at run time by every DOM, markup and `document.write` path, with guards that hold when the page redefines built-ins.
+- Q4: In the OpenChamber pane a page can navigate its own frame to a `data:` URL (`location`, a link click kept from bubbling, a meta refresh). The new document has no bridge, so its WebRTC and prerender reach the network without a click. The guest CSP allows `frame-src 'self' data: blob:`; the browser surface blocks it. A stricter `frame-src` in the panel document may close it; it needs checking in the real OpenChamber.
 
 ## Risks
 - Agent-written HTML is arbitrary code: contain it with an opaque-origin sandbox, a strict CSP, and a bridge that validates every message.
-- CSP does not cover Chrome's prerender of `<link rel="prerender">` or WebRTC, so a page could reach a server of its choosing without a click. Canvas rejects them in `canvas_show`, strips them when building the page, and guards their creation at run time, but a nested frame gets fresh globals and escapes the run-time guards. OpenChamber's guest CSP has the same gap; worth reporting upstream.
+- CSP does not cover Chrome's prerender of `<link rel="prerender">` or WebRTC, so a page could reach a server of its choosing without a click. Canvas rejects them in `canvas_show`, strips them when building the page, and guards their creation at run time; nested frames, which would escape those guards, are refused the same way. The guards live in the page's own realm, so a new browser API that creates a browsing context, or a DOM path the bridge does not wrap, would reopen the gap. In the pane, a page can still leave the bridge behind by navigating its own frame to a `data:` URL (Q4). OpenChamber's guest CSP has the same gaps; worth reporting upstream.
 - The OpenUI component reference is large: serve it on demand through a tool, not the system prompt.
 - Larger content increases tool-call size: enforce limits and return clear errors.
 
@@ -59,3 +60,4 @@ A general-purpose visual surface for OpenCode agents. An agent can build anythin
 - 2026-10-12 to 2026-10-13: Version 0.1 built and validated: fixed diagram, sections, and choices; native OpenCode and OpenChamber loops; Tailscale mobile access.
 - 2026-10-15: The user rejected 0.1's narrow scope. Decided on a hard-cutover rebuild with OpenUI plus sandboxed HTML (D1–D3).
 - 2026-10-15: Review fixes for 0.2: host-verified user gestures for HTML sends and links, project views no longer auto-open, prerender/WebRTC refused and guarded, session adoption after an OpenCode restart, lost submit answers confirmed instead of resent, snapshots without sources, OpenUI themed with the Canvas palette and accent, DatePicker and other component fixes, README rewritten for 0.2.
+- 2026-10-15: Nested frames refused in `canvas_show` and blocked at run time (Q3 resolved). The bridge guards were hardened against redefined built-ins, attribute nodes and split `document.write` calls. Found that a page in the pane can navigate its own frame to a `data:` URL (Q4).

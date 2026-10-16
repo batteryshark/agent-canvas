@@ -51,6 +51,13 @@ export function speculativeTags(source: string): Array<{ index: number; length: 
   return found.sort((a, b) => a.index - b.index);
 }
 
+/** Elements that open a nested frame: its fresh globals would escape the bridge's run-time network guards. */
+const FRAME_TAG = /<(iframe|frame|object|embed|fencedframe)(?=[\t\n\f\r />])(?:[^>"']|"[^"]*"|'[^']*')*>?/gi;
+/** Start tags of nested frames outside comments, with their positions: anywhere in the source, script strings included. */
+export function frameTags(source: string): Array<{ index: number; length: number; tag: string }> {
+  return [...blankComments(source).matchAll(FRAME_TAG)].map(m => ({ index: m.index, length: m[0].length, tag: m[0] }));
+}
+
 /** The distinct library names a page asks for, in first-use order. */
 export function libraryNames(source: string): string[] {
   return [...new Set(libraryTags(source).map(t => t.name))];
@@ -83,6 +90,8 @@ export function checkHtml(source: string): Check {
 
   const speculative = speculativeTags(source);
   if (speculative.length) errors.push(`Remove ${shown(speculative.map(s => s.tag.slice(0, 80)))}: prerender, prefetch, dns-prefetch and preconnect links and speculation rules would reach the network, and Canvas pages have none. Link to pages with <a href>; they open in the user's browser when clicked.`);
+  const frames = frameTags(source);
+  if (frames.length) errors.push(`Remove ${shown(frames.map(f => f.tag.slice(0, 80)))}: Canvas pages cannot contain nested frames (<iframe>, <frame>, <object>, <embed>), in the markup or built by a script. Put the content in the page itself (inline SVG, <img src="data:…">, plain markup), and link to other sites with <a href>; links open in the user's browser when clicked.`);
   if (/\b(?:webkit)?RTC(?:PeerConnection|DataChannel|IceTransport)\b/.test(code)) errors.push('WebRTC (RTCPeerConnection) is not available: Canvas pages have no network access. Simulate peers inside the page instead.');
 
   const tags = libraryTags(code);
@@ -117,10 +126,10 @@ export function checkHtml(source: string): Check {
 
   const assets = [
     ...[...code.matchAll(/\b(?:src|poster|data|srcset|xlink:href)\s*=\s*["']?\s*((?:https?:)?\/\/[^"'\s>)]+|www\.[^"'\s>)]+)/gi)].map(m => m[1]),
-    ...[...code.matchAll(/<(?:img|image|video|audio|source|iframe|use|object|embed|track)\b[^>]*?\bhref\s*=\s*["']?\s*((?:https?:)?\/\/[^"'\s>)]+)/gi)].map(m => m[1]),
+    ...[...code.matchAll(/<(?:img|image|video|audio|source|use|track)\b[^>]*?\bhref\s*=\s*["']?\s*((?:https?:)?\/\/[^"'\s>)]+)/gi)].map(m => m[1]),
     ...[...code.matchAll(/url\(\s*["']?\s*((?:https?:)?\/\/[^"')\s]+)/gi)].map(m => m[1]),
   ].filter(u => remote(u) && !scripts.includes(u));
-  if (assets.length) warnings.push(`Remote images, fonts, frames and media will not load (${shown([...new Set(assets)])}): Canvas pages have no network access. Draw with inline SVG or CSS, or embed small assets as data: URLs.`);
+  if (assets.length) warnings.push(`Remote images, fonts and media will not load (${shown([...new Set(assets)])}): Canvas pages have no network access. Draw with inline SVG or CSS, or embed small assets as data: URLs.`);
 
   const modules = [...code.matchAll(/<script\b[^>]*\btype\s*=\s*["']?module\b[^>]*>([\s\S]*?)<\/script\s*>/gi)]
     .flatMap(m => [...m[1].matchAll(/\bimport\s*(?:[\w$*{},\s]+?\s*from\s*)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g)].map(i => i[1] ?? i[2]));

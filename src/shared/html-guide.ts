@@ -286,6 +286,7 @@ When unsure, use OpenUI for data and decisions and HTML for pixels and motion.
 
 1. **Send one complete document**: \`<!doctype html><html><head>…</head><body>…</body></html>\`, with every style and script inline. The limit is ${n(LIMITS.htmlSource)} characters. To revise, call \`canvas_show\` again with \`viewId\`, \`expectedRevision\` (the latest revision) and the whole new document.
 2. **There is no network.** Nothing remote loads: CDN scripts, stylesheets, web fonts, \`@import\`, remote images, iframes, \`fetch\`, \`XMLHttpRequest\`, WebSockets. Embed data as JavaScript constants, draw images with inline SVG or CSS (or small \`data:\` URLs), and use the theme fonts. \`canvas_show\` refuses pages that use prerender, prefetch, dns-prefetch or preconnect links, speculation rules, or WebRTC (\`RTCPeerConnection\`), and the page cannot create them at run time either.
+   - **No nested frames.** \`<iframe>\`, \`<frame>\`, \`<object>\` and \`<embed>\` are refused in the markup and blocked at run time, so a video embed or an embedded site cannot work. Put the content in the page itself and link to other sites with \`<a href>\`.
 3. **Bundled libraries** load with an empty script tag, \`<script src="canvas:lib/NAME"></script>\`, placed before the code that uses them. Canvas inlines the library before the page renders. Available:
 ${libraries}
 4. **The page is sandboxed.** It runs with scripts only, in an origin of its own:

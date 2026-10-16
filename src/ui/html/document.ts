@@ -1,7 +1,7 @@
 // Turns agent HTML into the document the sandboxed frame renders: theme variables and the bridge at
 // the top of <head>, and every <script src="canvas:lib/NAME"></script> replaced by the library inline.
 import { LIMITS } from '../../shared/contract';
-import { libraryTags, speculativeTags } from '../../shared/html-check';
+import { frameTags, libraryTags, speculativeTags } from '../../shared/html-check';
 import { bridgeScript, type BridgeConfig } from './bridge';
 
 export type Appearance = 'light' | 'dark';
@@ -104,18 +104,19 @@ function inlineScripts(source: string): Array<{ start: number; end: number }> {
 }
 
 /** checkHtml refuses these; a page saved before that rule, or one that slips past it, still never gets them. */
-function withoutSpeculativeTags(source: string): string {
+function withoutTags(source: string, tags: Array<{ index: number; length: number; tag: string }>, reason: string): string {
   let out = '', cursor = 0;
-  for (const tag of speculativeTags(source)) {
+  for (const tag of tags.sort((a, b) => a.index - b.index)) {
     if (tag.index < cursor) continue;
-    out += source.slice(cursor, tag.index) + '<!-- removed by Agent Canvas: no network -->' + '\n'.repeat(newlines(tag.tag));
+    out += source.slice(cursor, tag.index) + `<!-- removed by Agent Canvas: ${reason} -->` + '\n'.repeat(newlines(tag.tag));
     cursor = tag.index + tag.length;
   }
   return out + source.slice(cursor);
 }
 
 export function buildDocument(original: string, options: BuildOptions): string {
-  const source = withoutSpeculativeTags(original);
+  const unframed = withoutTags(original, frameTags(original), 'no nested frames');
+  const source = withoutTags(unframed, speculativeTags(unframed), 'no network');
   const tags = libraryTags(source);
   const missing = [...new Set(tags.map(t => t.name).filter(name => typeof options.libraries[name] !== 'string'))];
   if (missing.length) throw new Error(`Unknown or unavailable bundled library: ${missing.map(n => `canvas:lib/${n}`).join(', ')}.`);
