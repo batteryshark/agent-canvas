@@ -57,7 +57,7 @@ await compile({ ...node, entryPoints: ['src/openchamber/bridge.ts'], outfile: `$
 const assetLoaders = { '.woff': 'dataurl', '.woff2': 'dataurl', '.ttf': 'dataurl', '.otf': 'dataurl', '.png': 'dataurl', '.svg': 'dataurl', '.gif': 'dataurl' };
 const page = (head = '') => `<!doctype html><html lang="en"><head><meta charset="utf-8">${head}<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>Agent Canvas</title><link rel="icon" href="data:,"><link rel="stylesheet" href="app.css"></head><body><div id="root"></div><script src="app.js"></script></body></html>\n`;
 // OpenChamber's guest CSP lets the pane's frames load 'self', data: and blob:, so an HTML page could navigate its own
-// frame to a document the bridge never runs in (PROJECT.md Q4). The pane's only frame is the srcdoc page, which CSP does
+// frame to a document the bridge never runs in (docs/SECURITY.md). The pane's only frame is the srcdoc page, which CSP does
 // not check, so the panel adds frame-src 'none'; browsers enforce it alongside the guest header. The browser surface's
 // app CSP, whose frame-src names only /frame, is sent by the service.
 const PANEL_HEAD = `<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">`;

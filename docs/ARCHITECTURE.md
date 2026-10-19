@@ -1,6 +1,6 @@
 # Agent Canvas architecture
 
-Version 0.2. A hard-cutover rebuild of 0.1 (see PROJECT.md, D1–D3). The 0.1 code is readable with `git show HEAD:<path>` for proven patterns; nothing from it is kept as legacy.
+Version 0.2 uses OpenUI and HTML views with a version-2 state store. It doesn't migrate 0.1's fixed-diagram documents. See [setup](SETUP.md), [tools and content](REFERENCE.md), and [security](SECURITY.md) for operator and author guidance.
 
 ## What the agent gets
 
@@ -17,7 +17,7 @@ The system note added to every conversation is short: Canvas exists, what it is 
 
 User input reaches the conversation as a queued user message whose text is `interactionPrompt()` from the contract:
 
-```
+````text
 [Agent Canvas] Checkout redesign (view 7c1e…, revision 3)
 Action: Choose layout B
 Data:
@@ -25,7 +25,7 @@ Data:
 { "layout": "B", "density": "compact" }
 ```
 Note: keep the old header
-```
+````
 
 ## Content formats
 
@@ -102,7 +102,7 @@ A complete, self-contained HTML document. It runs in a nested iframe whose origi
   - **Pane:** OpenChamber's guest CSP allows `frame-src 'self' data: blob:`, so the panel's `index.html` (written by `scripts/build.mjs` for the pane only) adds `<meta http-equiv="Content-Security-Policy" content="frame-src 'none'">`. The browser enforces it together with the guest header, so every navigation of the HTML frame is refused. The `srcdoc` page itself is not fetched, so CSP does not check it. OpenChamber's relay mode renders the panel as `srcDoc` with the guest policy as its first `<meta>` and, by the SDK's documentation, keeps the panel's own CSP.
   - **Browser:** the app CSP's `frame-src` names one URL, `/frame` at the address the browser is using (`frame-src http://127.0.0.1:4317/frame`, or the Tailscale origin's), so every other navigation of the HTML frame is refused: `data:`, `blob:`, and any other Canvas URL, such as `/api/snapshot`. A CSP path needs a host-source, so the service builds the policy for each request from its `Host` header, which must be the host of a trusted origin: the endpoint, its `localhost` name, or the public URL (Tailscale Serve passes the browser's `Host` on). At any other host the app is not served. CSP percent-decodes the path and ignores the query, so the service serves the shell at every spelling it allows (`/%66rame`, `/frame?x`); such a navigation reloads the shell, which renders the page again, as a self-reload does. CSP also skips path matching after a redirect, so the service never redirects.
 
-  Chrome shows its error page in a frame whose navigation was refused. The page cannot be held in place instead: `location` cannot be wrapped, and the Navigation API fires no `navigate` event in an opaque-origin document. The refusal does reach the host realm, though: the app or panel document whose `frame-src` refused it receives a `securitypolicyviolation` event, and `HtmlView.tsx` then replaces the frame with a notice ("This page tried to navigate away from the canvas and was stopped", with a button to show the page again) and reports a render error that tells the agent to use `canvas.openLink` or in-page content. It never reloads the page on its own, since a page that navigates on load would loop. CSP does not check a navigation to `about:blank`: in the browser such a frame turns blank, with nothing left to run, and is not reported. See PROJECT.md Q4.
+   Chrome shows its error page in a frame whose navigation was refused. The page cannot be held in place instead: `location` cannot be wrapped, and the Navigation API fires no `navigate` event in an opaque-origin document. The app or panel document whose `frame-src` refused it receives a `securitypolicyviolation` event. `HtmlView.tsx` replaces the frame with a notice and reports a render error that tells the agent to use `canvas.openLink` or in-page content. It never reloads the page on its own, since a page that navigates on load would loop. CSP does not check a navigation to `about:blank`: in the browser such a frame turns blank, with nothing left to run, and is not reported. Real OpenChamber acceptance remains unverified; see [security](SECURITY.md#frame-navigation).
 - **Message channel:** `{ channel: 'agent-canvas', v: 1, type, ... }`. The host accepts messages only when `event.source` is its own frame's `contentWindow`, and `send` and `link` only during a user gesture. Host → frame: `render` (shell mode), `theme`, `ack`. Frame → host: `ready`, `send`, `state`, `size`, `link`, `error`.
 - **Service-side `checkHtml(source)`:**
   - errors: empty source, an unknown `canvas:lib/NAME`, size over the limit, speculative links and speculation rules, WebRTC, nested frames;
@@ -115,7 +115,7 @@ A complete, self-contained HTML document. It runs in a nested iframe whose origi
 - `connection.json`: endpoint, agent token, public URL; created with mode 0600.
 - `state.json`: format version 2. Any other version fails with a message telling the user to move the file aside; there is no migration.
 
-Store, `src/server/store.ts`. It keeps the 0.1 semantics, rebuilt:
+`src/server/store.ts` implements the persistence and delivery operations:
 - `register`, `session`, `viewer`, `resolve`, as in 0.1.
 - `show(ShowRequest) → { id, revision, warnings }`:
   - Validates with `validateOpenUI` or `checkHtml`; errors become a 400 with every message.
@@ -171,17 +171,9 @@ The viewer treats a submit that got no answer (a network error, a timeout, a hos
   - Theme follows the host (pane) or `prefers-color-scheme` (browser).
   - Mobile width must not overflow horizontally.
 
-## Source layout and owners
+## Cross-module contract
 
-| Path | Owner |
-| --- | --- |
-| `src/shared/contract.ts` | Lead. Builders must not edit it; report needed changes instead. |
-| `src/server/*` (`store.ts`, `http.ts`, `config.ts`, `client.ts`, `cli.ts`), `src/shared/demo.ts`, `test/store.test.ts`, `test/http.test.ts` | Service builder |
-| `src/opencode/*` (`plugin.ts`, `worker.ts`, `service.ts`, `guide.ts`), `scripts/test-runtime.mjs`, `test/runtime-model.ts`, `test/plugin.test.ts` | Plugin builder |
-| `src/ui/openui/*`, `src/shared/openui-validate.ts`, `scripts/generate-openui.mjs`, `test/openui.test.ts` | OpenUI builder |
-| `src/ui/html/*`, `src/shared/html-check.ts`, `src/shared/html-guide.ts`, `src/server/frame-shell.ts`, `test/html.test.ts` | HTML builder |
-| `src/ui/app.tsx`, `src/ui/transport.ts`, `src/ui/drafts.ts`, `src/ui/style.css`, `src/openchamber/bridge.ts` | Shell builder |
-| `scripts/build.mjs`, `package.json` scripts, `playwright.config.ts`, `test/browser/*`, `test/browser-fixture.ts`, `test/pane-host.html` | Build-and-browser-test builder |
+`src/shared/contract.ts` defines payload schemas and limits for every module. The [development source map](DEVELOPMENT.md#source-map) identifies implementation paths. Keep tests and consumers in sync when changing the interfaces below.
 
 ### Cross-module interfaces (exact)
 
@@ -254,12 +246,12 @@ export function deliverToSession(api: Pick<Plugin.Context['session'], 'get' | 'w
 - `dist/opencode/`: `index.js` (plugin, ESM), `canvas-service.cjs`, `web/` (`index.html`, `app.js`, `app.css`, `lib/`), `package.json`, `README.md`, `THIRD_PARTY_NOTICES.md`.
 - `dist/openchamber/`: `panel/` (same app built with `__CANVAS_SURFACE__='openchamber'`, its `index.html` adding `frame-src 'none'`, `lib/`), `service/main.cjs`, `package.json` manifest (validated with `parseManifestJson`), `README.md`, `THIRD_PARTY_NOTICES.md`.
 
-Notices cover every bundled or copied package. The 0.1 approach in `git show HEAD:scripts/build.mjs` works.
+The build collects notices for bundled or copied packages. Review the actual generated output and dependency terms before redistributing it; see [rights](../RIGHTS.md).
 
 ## Tests
 
 - `npm test`: node:test through tsx over `test/*.test.ts`, covering the store, http, plugin, openui and html tests.
-- `npm run test:browser`: Playwright against installed Chrome. It must cover:
+- `npm run test:browser`: Playwright against installed Chrome. Coverage includes:
   - an OpenUI view with a chart, a table and a form, where submitting the form delivers its values;
   - an HTML view whose `canvas.send` and `data-canvas-action` form deliver;
   - an HTML page that cannot `fetch`, cannot reach the parent's storage, and cannot navigate the top window;
@@ -287,11 +279,6 @@ Notices cover every bundled or copied package. The 0.1 approach in `git show HEA
   - ordinary chat survives a Canvas outage.
 - `npm run check`: typecheck, `npm test`, build.
 
-## Rules for every builder
+## Test isolation
 
-- Write only the files you own. Read anything. Use `git show HEAD:<path>` for the 0.1 code.
-- Do not run `npm install`; every dependency is already installed. If you need another one, say so in your report.
-- Never use port 4317 or `~/.local/share/agent-canvas`. They belong to the user's live 0.1 install. Set `AGENT_CANVAS_HOME` to a temp directory and `AGENT_CANVAS_PORT` to a free port for anything you run.
-- Do not edit anything under `~/.config` or `~/Projects/_scratch`.
-- Match the code style: compact TypeScript, few comments, each one explaining a reason.
-- Typecheck your own files with `npx tsc --noEmit -p .`. Errors in other builders' files are expected while they work; ignore them.
+Use disposable Canvas and XDG data directories and unused ports for runtime tests. Never point fixtures at a live store or shared service. These suites start listeners, browsers or native processes; review their effects before execution. [Development](DEVELOPMENT.md) records commands and acceptance gaps. Match the compact TypeScript style, with comments that explain constraints and decisions.
