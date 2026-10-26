@@ -17,7 +17,7 @@ These commands require an environment where those effects are permitted. The nat
 
 The retained tests cover persistence, project/session scoping, revision conflicts, delivery idempotency, draft ordering, HTML validation/document policies, OpenUI schema and actions, the pane host protocol and mobile layout. Browser security fixtures deliberately attempt network and frame escapes against local beacon listeners. They require explicit permission to run.
 
-Historical 0.2 validation recorded 71 unit tests, 36 browser tests and 18 native checks on OpenCode 2.0.23 and 2.0.28. Those results predate this documentation candidate and haven't been reproduced for it. The full build, typecheck, unit/browser/native suites, dependency installation and device checks remain unrun for this candidate. Real OpenChamber 0.2 host integration, Safari/Firefox and the Tailscale physical-phone path still need acceptance.
+Real OpenChamber 0.2 host integration, Safari/Firefox and the Tailscale physical-phone path still need acceptance. Host-policy fixtures do not establish compatibility with those environments.
 
 This source tree has no checked-in CI workflow. The test scripts and portable fixtures are retained for an operator-authorized validation run.
 
