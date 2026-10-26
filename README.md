@@ -29,7 +29,7 @@ HTML accepts a complete, self-contained document for custom layouts, SVG, animat
 
 ![HTML capacity chart and decision form rendered in Agent Canvas with example figures](docs/canvas-html.png)
 
-These existing captures show Canvas rendering demonstration content with illustrative figures. The phone layouts are HTML mockups. See [image notes](docs/SCREENSHOTS.md) for scope and provenance.
+These screenshots show demonstration content with illustrative figures. The phone layouts are HTML mockups. See [image notes](docs/SCREENSHOTS.md) for scope and provenance.
 
 ## Get started
 

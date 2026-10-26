@@ -1,6 +1,6 @@
 # Image notes
 
-The four PNGs in this directory show the existing Canvas interface rendering demonstration content. They are unchanged from the public source and match the prepared release assets byte-for-byte. No new UI, browser or service was launched to produce them.
+The four PNGs in this directory show the Canvas interface rendering demonstration content.
 
 | Image | Content |
 | --- | --- |
@@ -13,4 +13,4 @@ The mockup's phone shapes and controls are HTML content rendered inside Canvas. 
 
 All four are 1380 pixels wide, with heights of 1000 pixels except the 955-pixel pane image. Their PNG containers have only image chunks (IHDR, IDAT and IEND), with no text or EXIF metadata.
 
-The AI-generated comic marks in `assets` are the approved existing artwork. The 32-pixel mark is a mechanical preview of the badge. Artwork terms and third-party attribution are in [RIGHTS.md](../RIGHTS.md).
+The comic marks in `assets` are AI-generated artwork. The 32-pixel mark is a mechanical preview of the badge. Artwork terms and third-party attribution are in [RIGHTS.md](../RIGHTS.md).
