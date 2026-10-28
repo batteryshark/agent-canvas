@@ -66,23 +66,6 @@ test('the sandboxed pane renders both formats, delivers sends, and follows the c
   expect(errors).toEqual([]);
 });
 
-test('the pane remembers a browser preference and can still show a view here once', async ({ page, request }) => {
-  const s = await seed(request, 'Surface preference', ['openui']);
-  await page.goto(harness(s.sessionId, s.sessionId));
-  const pane = paneOf(page);
-  await openView(pane, TITLES.openui);
-  await expect(pane.locator('[data-canvas-format="openui"]')).toBeVisible();
-  const select = pane.getByLabel('Preferred surface');
-  const browser = await select.locator('option').filter({ hasText: /browser/i }).first().getAttribute('value');
-  await select.selectOption(browser!);
-
-  await page.reload();
-  await expect(pane.getByRole('button', { name: 'Show here this time', exact: true })).toBeVisible();
-  await pane.getByRole('button', { name: 'Show here this time', exact: true }).click();
-  await openView(pane, TITLES.openui);
-  await expect(pane.locator('[data-canvas-format="openui"]').getByText('Funnel detail')).toBeVisible();
-});
-
 test('switching conversations while the pane is saving never sends input to the other conversation', async ({ page, request }) => {
   const s = await seed(request, 'Race conversation', ['html']);
   const other = await seed(request, 'Other conversation', ['html']);

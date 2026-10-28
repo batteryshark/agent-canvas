@@ -163,11 +163,11 @@ The viewer treats a submit that got no answer (a network error, a timeout, a hos
   - `tools`: `{ match: 'canvas_*', name: 'Agent Canvas', icon, title: '{input.title}', output: 'markdown' }`. The panel and tool icon is the Remix Icon `layout`.
   - The host service (`src/openchamber/bridge.ts`) keeps the 0.1 pattern: `/connect` returns only this session's viewer key; `/request` forwards an allowlisted `/api/*` path; `/lib/NAME` serves a bundled library.
 - **App shell:**
-  - Sidebar: this conversation's views and the project views. A project view another conversation wrote never opens on its own: with no view of its own, the conversation shows the empty state until the user picks one. On a phone the views strip scrolls sideways and keeps the open view in sight.
-  - Toolbar: open in browser, pin/rename, full screen.
-  - Revision bar, with a stale-revision banner that blocks sending. A revision the user chose to look at is dropped as soon as the conversation shows a new revision of its own, so an agent's reply is never hidden behind a stale banner.
-  - A content host that switches on format, an optional "Note to the agent" field attached to the next send (disabled until the revision's draft has loaded), and a delivery list with retry.
-  - Preferred surface (pane or browser), and an empty state that suggests mockups, charts and forms.
+  - Two parts: a compact list of views and the open view. Nothing else is explanatory text.
+  - List: a one-line session row (status dot, conversation title), then this conversation's views and the project views, each with its title, a "pinned" tag for project views and the time. A project view another conversation wrote never opens on its own: with no view of its own, the conversation shows a one-line empty state until the user picks one. On a phone the list is one strip that scrolls sideways and keeps the open view in sight.
+  - One-line view header: the title (the summary as its tooltip), the time, a revision select when there is more than one revision, and icon buttons for pin/rename, open in browser and full screen.
+  - A stale-revision banner that blocks sending. A revision the user chose to look at is dropped as soon as the conversation shows a new revision of its own, so an agent's reply is never hidden behind a stale banner.
+  - A content host that switches on format, an optional one-line "Note to the agent" field attached to the next send (disabled until the revision's draft has loaded), and a delivery list with retry.
   - Theme follows the host (pane) or `prefers-color-scheme` (browser).
   - Mobile width must not overflow horizontally.
 
@@ -229,16 +229,16 @@ export function deliverToSession(api: Pick<Plugin.Context['session'], 'get' | 'w
 ### UI test hooks (the shell provides them; browser tests rely on them)
 
 - Sidebar: `nav[aria-label="Saved views"]`, with one button per view showing its title or pinned name.
-- Toolbar buttons are labeled:
+- Toolbar buttons are icons with accessible names:
   - "Open in browser" in the pane, "Open viewing link" in the browser;
   - "Pin to project", or "Rename project view" once pinned;
   - "Full screen" and "Exit full screen".
 - Pin form: an input labeled "Project view name" and a "Save project view" button.
-- Revisions: a select labeled "Revision". When an older revision is shown, a `role="status"` banner contains "newer revision".
+- Revisions: a select labeled "Revision", present when a view has more than one revision. When an older revision is shown, a `role="status"` banner contains "newer revision".
 - A textarea labeled "Note to the agent".
 - Deliveries: `section[aria-label="Sent to your agent"]`. Each item is `.delivery[data-status="queued|sending|delivered|unsent|uncertain"]`, with a "Retry" button when unsent.
 - Content host: `[data-canvas-format="openui"]` or `[data-canvas-format="html"]`. The HTML iframe is titled `Canvas page: <view title>`.
-- Errors: `role="alert"`. Session line: `.session-info`. A select labeled "Preferred surface", and a "Show here this time" button.
+- Errors: `role="alert"`. Session line: `.session-info`.
 
 ### Build output
 

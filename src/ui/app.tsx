@@ -46,6 +46,21 @@ const info = ({ content, ...revision }: Revision): RevisionInfo => ({ ...revisio
 /** A failure the service answered: definite. Anything else (no answer, a timeout, a host or bridge failure) may have been admitted. */
 const answered = (e: unknown) => e instanceof CallError && e.status >= 400 && e.status < 500;
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
+/** A view's time in the list and header: the time today, else the date. */
+function when(iso: string) {
+  const d = new Date(iso), now = new Date();
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
+}
+const icon = (d: string) => <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>;
+const ICONS = {
+  pin: icon('M10.5 2 14 5.5l-2.5 1-2.5 2.5.5 3L8 13.5 2.5 8 4 6.5l3 .5L9.5 4.5zM5 11l-3 3'),
+  pinned: <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.5 2 14 5.5l-2.5 1-2.5 2.5.5 3L8 13.5 2.5 8 4 6.5l3 .5L9.5 4.5zM5 11l-3 3" /></svg>,
+  open: icon('M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5H7'),
+  expand: icon('M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10'),
+  shrink: icon('M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5'),
+};
 
 function App({ transport: t }: { transport: Transport }) {
   const initialView = useRef(new URLSearchParams(location.hash.slice(1)).get('view') || '');
@@ -62,7 +77,6 @@ function App({ transport: t }: { transport: Transport }) {
   const [pending, setPending] = useState<Submission>();
   const [sending, setSending] = useState<string>();
   const [pinName, setPinName] = useState(''), [pinning, setPinning] = useState(false);
-  const [preference, setPreference] = useState('pane'), [showHere, setShowHere] = useState(false);
   const [full, setFull] = useState(false);
   const [appearance, setAppearance] = useState<Appearance>(() => t.appearance());
   const [, setReportVersion] = useState(0);
@@ -84,7 +98,6 @@ function App({ transport: t }: { transport: Transport }) {
   const conversationViews = snapshot ? snapshot.views.filter(v => shownHere(snapshot, v.id)) : [];
   const projectViews = snapshot ? snapshot.views.filter(v => v.pinnedName && !shownHere(snapshot, v.id)) : [];
   const deliveries = snapshot && view ? snapshot.interactions.filter(a => a.viewId === view.id) : [];
-  const browserPreferred = t.mode === 'openchamber' && preference === 'browser' && !showHere;
   const disabled = !!sending || stale || !ready;
   const live = useRef({ snapshot, view, ready, note });
   live.current = { snapshot, view, ready, note };
@@ -101,7 +114,7 @@ function App({ transport: t }: { transport: Transport }) {
 
   useEffect(() => t.onContext(state => {
     generation.current++; setContextVersion(generation.current); setReady(state.ready);
-    setSnapshot(undefined); setOverride(undefined); setSelected(''); setNote(''); setPending(undefined); setPinning(false); setShowHere(false);
+    setSnapshot(undefined); setOverride(undefined); setSelected(''); setNote(''); setPending(undefined); setPinning(false);
     sendingRef.current = false; setSending(undefined); revisionRequest.current++;
     setError(''); setConnectionError(state.error || '');
   }), [t]);
@@ -124,7 +137,6 @@ function App({ transport: t }: { transport: Transport }) {
     const root = document.documentElement;
     root.dataset.theme = appearance; root.setAttribute('data-openui-theme', appearance); root.style.colorScheme = appearance;
   }, [appearance]);
-  useEffect(() => { t.load<string>('surface').then(v => { if (v === 'pane' || v === 'browser') setPreference(v); }).catch(() => {}); }, [t]);
   useEffect(() => {
     // While the page is hidden or going away, drafts are written at once: a delayed write may never run.
     const hide = () => { void drafts.setHidden(true); }, show = () => { void drafts.setHidden(false); };
@@ -319,73 +331,50 @@ function App({ transport: t }: { transport: Transport }) {
           onErrors={handlers.onErrors} fill={full} />;
   }
   const openHere = () => snapshot && t.open(viewLink(snapshot.browserUrl, view?.id));
+  // Conversation views first, then project views this conversation never showed.
+  const listed = snapshot ? [...conversationViews, ...projectViews] : [];
   const navButton = (v: ViewSummary) => <button type="button" key={v.id} className={`nav-item${view?.id === v.id ? ' active' : ''}`} aria-current={view?.id === v.id ? 'true' : undefined} onClick={() => selectView(v.id)}>
-    <span className="nav-icon" aria-hidden="true">{v.revision.format === 'html' ? '⌗' : '◫'}</span>
     <span className="nav-label">{viewLabel(v)}</span>
-    <small>{v.pinnedName && shownHere(snapshot!, v.id) ? 'pinned · ' : ''}v{v.revision.number}</small>
+    <small>{v.pinnedName ? 'pinned · ' : ''}<time dateTime={v.revision.createdAt}>{when(v.revision.createdAt)}</time></small>
   </button>;
   const status = snapshot ? (snapshot.connected ? 'Agent connected' : 'Agent offline: saved views remain available') : ready ? 'Connecting…' : 'Not connected';
 
   return <div className={`shell${full ? ' full' : ''}`}>
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark" aria-hidden="true">◇</span><div><strong>Agent Canvas</strong><span>Show it, don’t describe it</span></div></div>
-      <div className="session-info">
-        <span className={`status-dot${snapshot?.connected ? ' online' : ''}`} aria-hidden="true" />
+      <div className="session-info" title={status}>
+        <span className={`status-dot${snapshot?.connected ? ' online' : ''}`} role="img" aria-label={status} />
         <span className="session-title">{snapshot?.session.title || (t.mode === 'openchamber' ? 'Connect a conversation' : 'No conversation')}</span>
-        {snapshot?.session.agent && <small>{snapshot.session.agent}</small>}
       </div>
-      <nav aria-label="Saved views" ref={nav}>{snapshot && <>
-        <p className="nav-heading">This conversation</p>
-        {conversationViews.map(navButton)}
-        {!conversationViews.length && <p className="nav-empty">Nothing shown in this conversation yet.</p>}
-        <p className="nav-heading">Project views</p>
-        {projectViews.map(navButton)}
-        {!snapshot.views.some(v => v.pinnedName) && <p className="nav-empty">Pin a useful view to reuse it in other conversations.</p>}
-      </>}</nav>
-      <div className="surface-setting">
-        <label htmlFor="surface">Preferred surface</label>
-        <select id="surface" value={preference} onChange={e => {
-          const value = e.target.value; setPreference(value); setShowHere(false);
-          t.save('surface', value).catch(err => setError(`Your preference could not be saved: ${message(err)}`));
-        }}><option value="pane">OpenChamber pane</option><option value="browser">Browser</option></select>
-        <p>New views never take your focus.</p>
-      </div>
+      <nav aria-label="Saved views" ref={nav}>
+        {listed.map(navButton)}
+        {snapshot && !listed.length && <p className="nav-empty">No views yet.</p>}
+      </nav>
     </aside>
     <main>
-      <div className="toolbar">
-        <span className="breadcrumb">{snapshot?.session.projectRoot.split('/').filter(Boolean).at(-1) || 'Workspace'}<span aria-hidden="true">/</span>{view ? viewLabel(view) : 'Canvas'}</span>
+      {view && revision && snapshot ? <header className="toolbar">
+        <h1 className="view-title" title={revision.summary || undefined}>{viewLabel(view)}</h1>
+        <span className="view-meta"><time dateTime={revision.createdAt}>{when(revision.createdAt)}</time>
+          {view.history.length > 1 && <select aria-label="Revision" value={revision.number} onChange={e => void selectRevision(Number(e.target.value))}>
+            {view.history.map(r => <option value={r.number} key={r.number}>v{r.number}{r.number === view.latest ? ' (latest)' : ''}</option>)}
+          </select>}
+        </span>
         <div className="toolbar-actions">
-          {snapshot && <button type="button" onClick={openHere}>{t.mode === 'openchamber' ? 'Open in browser' : 'Open viewing link'}<span aria-hidden="true"> ↗</span></button>}
-          {view && !browserPreferred && <button type="button" onClick={() => { setPinName(view.pinnedName || view.revision.title); setPinning(!pinning); }}>{view.pinnedName ? 'Rename project view' : 'Pin to project'}</button>}
-          {view && !browserPreferred && <button type="button" onClick={() => setFull(!full)}>{full ? 'Exit full screen' : 'Full screen'}</button>}
+          <button type="button" className="icon" aria-label={view.pinnedName ? 'Rename project view' : 'Pin to project'} title={view.pinnedName ? 'Rename project view' : 'Pin to project'} aria-pressed={pinning}
+            onClick={() => { setPinName(view.pinnedName || view.revision.title); setPinning(!pinning); }}>{view.pinnedName ? ICONS.pinned : ICONS.pin}</button>
+          <button type="button" className="icon" aria-label={t.mode === 'openchamber' ? 'Open in browser' : 'Open viewing link'} title={t.mode === 'openchamber' ? 'Open in browser' : 'Open viewing link'} onClick={openHere}>{ICONS.open}</button>
+          <button type="button" className="icon" aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'} onClick={() => setFull(!full)}>{full ? ICONS.shrink : ICONS.expand}</button>
         </div>
-      </div>
+      </header> : null}
       {(error || connectionError) && <div className="banner error" role="alert">
         <span>{[error, connectionError].filter(Boolean).join(' ')}</span>
         {error && <button type="button" onClick={() => setError('')}>Dismiss</button>}
       </div>}
       {pinning && view && <div className="pin-form" role="group" aria-label="Pin project view">
-        <label htmlFor="pin-name">Project view name</label>
-        <input id="pin-name" value={pinName} maxLength={LIMITS.pinnedName} onChange={e => setPinName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void pin(); } }} />
+        <input aria-label="Project view name" value={pinName} maxLength={LIMITS.pinnedName} onChange={e => setPinName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void pin(); } if (e.key === 'Escape') setPinning(false); }} autoFocus />
         <button type="button" className="primary" disabled={!pinName.trim()} onClick={() => void pin()}>Save project view</button>
         <button type="button" onClick={() => setPinning(false)}>Cancel</button>
       </div>}
-      {browserPreferred && snapshot ? <div className="empty-state">
-        <span className="empty-symbol" aria-hidden="true">◇</span>
-        <h1>Your Canvas is ready.</h1>
-        <p>You chose the browser as your preferred surface. {snapshot.views.length} saved {snapshot.views.length === 1 ? 'view' : 'views'} in this conversation and project.</p>
-        <div className="empty-actions">
-          <button type="button" className="primary" onClick={openHere}>Open Canvas in browser<span aria-hidden="true"> ↗</span></button>
-          <button type="button" onClick={() => setShowHere(true)}>Show here this time</button>
-        </div>
-      </div> : view && revision && snapshot ? <article>
-        <div className="revision-bar">
-          <span className="revision-meta">By {revision.agent || 'agent'} · <time dateTime={revision.createdAt}>{new Date(revision.createdAt).toLocaleString()}</time>{view.pinnedName ? ' · project view' : ''}</span>
-          <label className="revision-select">Revision <select aria-label="Revision" value={revision.number} onChange={e => void selectRevision(Number(e.target.value))}>
-            {view.history.map(r => <option value={r.number} key={r.number}>{r.number}{r.number === view.latest ? ' · latest' : ''}</option>)}
-          </select></label>
-        </div>
-        {revision.summary && <p className="summary">{revision.summary}</p>}
+      {view && revision && snapshot ? <article>
         {stale && <div className="banner notice" role="status">
           You are looking at revision {revision.number}. A newer revision ({view.latest}) exists, so sending from this one is paused.
           <button type="button" onClick={() => void selectRevision(view.latest)}>Show revision {view.latest}</button>
@@ -402,37 +391,20 @@ function App({ transport: t }: { transport: Transport }) {
           <summary>{renderErrors.length === 1 ? 'One problem' : `${renderErrors.length} problems`} while rendering this view. Your agent sees {renderErrors.length === 1 ? 'it' : 'them'} when it reads the view.</summary>
           <ul>{renderErrors.map(e => <li key={e}>{e}</li>)}</ul>
         </details>}
-        <div className="notes">
-          <label htmlFor="note">Note to the agent <span>optional</span></label>
-          <textarea id="note" value={note} maxLength={LIMITS.notes} disabled={loadedDraft !== key} placeholder="A constraint, a hunch, or what to focus on next…" onChange={e => changeNote(e.target.value)} />
-          <p>Goes with your next input from this view to <strong>{snapshot.session.title}</strong>.</p>
-        </div>
+        <textarea className="note" aria-label="Note to the agent" rows={1} value={note} maxLength={LIMITS.notes} disabled={loadedDraft !== key}
+          placeholder="Note to the agent, sent with your next input (optional)" onChange={e => changeNote(e.target.value)} />
         {deliveries.length > 0 && <section className="deliveries" aria-label="Sent to your agent">
-          <h2>Sent to your agent</h2>
           {deliveries.slice(-6).reverse().map(a => <div className="delivery" data-status={a.status} key={a.id}>
             <span className="status-pill">{STATUS_LABEL[a.status]}</span>
             <div className="delivery-body">
-              <strong>{a.action}</strong> <small>revision {a.revision} · <time dateTime={a.updatedAt}>{new Date(a.updatedAt).toLocaleTimeString()}</time></small>
+              <strong>{a.action}</strong> <small>v{a.revision} · <time dateTime={a.updatedAt}>{new Date(a.updatedAt).toLocaleTimeString()}</time></small>
               {a.notes && <q>{a.notes}</q>}
               {a.detail && <p>{a.detail}</p>}
             </div>
             {a.status === 'unsent' && <button type="button" onClick={() => void retry(a.id)}>Retry</button>}
           </div>)}
         </section>}
-      </article> : <div className="empty-state">
-        <span className="empty-symbol" aria-hidden="true">◇</span>
-        <p className="eyebrow">Your agent’s visual workspace</p>
-        <h1>Show it, don’t describe it.</h1>
-        <p>Ask your agent to put it on the canvas: a screen mockup, a chart of real data, a form to fill in, a diagram of how things fit together. What you click, choose, or type here goes back to the conversation.</p>
-        <ul className="examples">
-          <li>“Mock up the settings page with two layout options.”</li>
-          <li>“Chart the test durations from the last run.”</li>
-          <li>“Give me a form to configure the release.”</li>
-          <li>“Draw how these services talk to each other.”</li>
-        </ul>
-        <span className="muted">{ready ? 'Waiting for the first view in this conversation.' : connectionError ? '' : 'Connecting…'}</span>
-      </div>}
-      <footer>Agent Canvas<span aria-hidden="true">·</span>{status}</footer>
+      </article> : <p className="empty-state">{!ready ? (connectionError ? '' : 'Connecting…') : snapshot ? 'No view open. Views your agent shows appear here.' : 'Connecting…'}</p>}
     </main>
   </div>;
 }
